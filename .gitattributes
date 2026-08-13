@@ -1,0 +1,14 @@
+# Normalise les fins de ligne : le depot stocke en LF, chaque machine recoit
+# ce qui lui convient. Sans ca, passer d'un PC a l'autre fait apparaitre des
+# diffs sur des fichiers qu'on n'a pas touches.
+* text=auto eol=lf
+
+*.py    text diff=python
+*.md    text
+*.json  text
+*.toml  text
+*.html  text
+
+*.db    binary
+*.png   binary
+*.jpg   binary

@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Cache de prix : volumineux, local, et perime vite.
+data/prices.db
+
+# La base statique est regenerable : python -m scripts.build_db
+data/collections.json
+
+.env
+
+# Rapports HTML generes
+rapports/
+
+# Journal : donnees personnelles (achats, contrats)
+data/journal.db
