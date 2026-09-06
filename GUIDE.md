@@ -201,10 +201,16 @@ les bonnes.
 
 Placez les 10 objets dans un contrat d'échange et validez.
 
-> Les objets achetés sur CSFloat arrivent avec un blocage d'échange de 7 jours.
-> **À vérifier** : ce blocage empêche-t-il de les utiliser dans un contrat ?
-> Ma compréhension est que non — le verrou bloque l'échange et la revente, pas
-> le craft. Testez-le avec un objet bon marché avant de tout acheter.
+> **Attendez 7 jours.** Les objets achetés sur CSFloat arrivent par échange
+> entre joueurs : ils sont verrouillés une semaine et **ne peuvent pas** entrer
+> dans un contrat pendant ce temps. Le marché Steam, lui, n'impose pas ce
+> blocage pour le craft — mais il coûte ~70 % plus cher et ne permet pas de
+> choisir les floats, ce qui annule largement l'avantage.
+>
+> Vous n'êtes pas engagé pour autant : au bout des 7 jours, si le contrat n'est
+> plus rentable, revendez les entrées au lieu de les fusionner. L'application
+> chiffre ce que coûte ce renoncement (de l'ordre de 7 % de la mise, contre
+> plusieurs fois plus à gagner).
 
 ### Étape 5 — Revendre sur CSFloat
 
