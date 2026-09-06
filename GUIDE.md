@@ -55,6 +55,28 @@ utilisable. `Ctrl+C` dans le terminal arrête le serveur.
 > L'application n'écoute que sur `127.0.0.1` : elle détient votre clé API, elle
 > n'a rien à faire sur le réseau. Personne d'autre ne peut y accéder.
 
+### Tout balayer
+
+Le bouton **« Tout calculer pour cette rareté »** enchaîne toutes les
+collections affichées, une par une, et enregistre chaque plan au journal. Les
+résultats s'affichent au fil de l'eau, classés par profit décroissant.
+
+L'estimation de coût est indiquée avant de lancer. Ordres de grandeur :
+
+| Rareté | Collections | Requêtes | Durée |
+|---|---|---|---|
+| Consumer | 38 | ~980 | ~2 h |
+| Mil-Spec | 88 | ~2 400 | ~4 h |
+| Toutes raretés | 315 | ~8 000 | ~15 h |
+
+**Le quota CSFloat vous arrêtera avant la fin.** C'est prévu : le balayage se
+met en pause, affiche « reprise dans N secondes », et repart tout seul. La
+collection en cours n'est pas perdue, elle est retentée.
+
+Réduisez le champ avec « Sorties max » si vous voulez des résultats plus vite :
+les collections à 1 ou 2 sorties sont de toute façon celles qui vous
+intéressent le plus.
+
 ### Trois onglets
 
 **Calculer** — la liste des collections et le lancement des plans.

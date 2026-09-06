@@ -68,6 +68,37 @@ class Job:
         return time.time() - self.started
 
 
+@dataclass
+class Batch:
+    """Balayage de toutes les collections d'une rarete, une par une.
+
+    Pourquoi une file plutot qu'un gros calcul : couvrir les 88 collections
+    Mil-Spec represente plusieurs milliers de requetes CSFloat, soit des heures
+    a 10/min -- et le quota tombera bien avant la fin. Une file traite les
+    collections dans l'ordre, enregistre chaque plan au journal au fil de l'eau,
+    et sait s'interrompre puis reprendre quand le quota revient.
+
+    Consequence : un balayage n'est pas une operation qu'on lance et qu'on
+    attend, c'est un travail de fond qui progresse sur des heures.
+    """
+
+    id: str
+    rarity: str
+    pending: list[str]
+    done: list[dict] = field(default_factory=list)
+    failed: list[dict] = field(default_factory=list)
+    total: int = 0
+    state: str = "running"  # running | paused | finished | stopped
+    message: str = ""
+    started: float = field(default_factory=time.time)
+    resume_at: float = 0.0
+
+    @property
+    def progress(self) -> float:
+        traites = len(self.done) + len(self.failed)
+        return traites / self.total if self.total else 0.0
+
+
 class App:
     """Etat partage du serveur : base, cle, taches."""
 
@@ -77,6 +108,7 @@ class App:
         self._api_key = api_key  # jamais expose
         self.rate = rate
         self.jobs: dict[str, Job] = {}
+        self.batches: dict[str, Batch] = {}
         self.journal = journal or Journal()
         self._lock = threading.Lock()
         # L'API CSFloat cote en USD, mais le site affiche -- et facture -- dans
@@ -164,6 +196,99 @@ class App:
             job.state = "error"
             job.message = f"{type(exc).__name__} : {exc}"
 
+    # --- Balayage complet ----------------------------------------------------
+
+    def start_batch(self, rarity_name: str, *, max_outcomes: int | None = None) -> Batch:
+        cols = self.collections(rarity_name)
+        if max_outcomes is not None:
+            cols = [c for c in cols if c["outcomes"] <= max_outcomes]
+        batch = Batch(
+            id=uuid.uuid4().hex[:12],
+            rarity=rarity_name,
+            pending=[c["id"] for c in cols],
+            total=len(cols),
+        )
+        with self._lock:
+            self.batches[batch.id] = batch
+        threading.Thread(target=self._run_batch, args=(batch,), daemon=True).start()
+        return batch
+
+    def _run_batch(self, batch: Batch) -> None:
+        self.load_currency()
+        source = CSFloat(self._api_key, calls_per_minute=self.rate)
+
+        while batch.pending and batch.state in ("running", "paused"):
+            if batch.state == "paused":
+                if time.time() < batch.resume_at:
+                    time.sleep(5)
+                    continue
+                batch.state = "running"
+                batch.message = ""
+
+            cid = batch.pending[0]
+            col = self.db.collection(cid)
+            try:
+                plan = build_plan(self.db, col, RARITES[batch.rarity], source)
+            except RateLimited:
+                # On NE retire PAS la collection de la file : le quota reviendra
+                # et elle sera retentee. Perdre une collection parce que l'API a
+                # dit non serait un trou silencieux dans le balayage.
+                batch.state = "paused"
+                batch.resume_at = time.time() + 600
+                batch.message = (
+                    "Quota CSFloat epuise. Reprise automatique dans 10 minutes."
+                )
+                continue
+            except Exception as exc:  # noqa: BLE001
+                log.exception("Balayage : %s en echec", col.name)
+                batch.pending.pop(0)
+                batch.failed.append({"collection": col.name, "error": str(exc)})
+                continue
+
+            batch.pending.pop(0)
+            if plan is None:
+                batch.failed.append(
+                    {"collection": col.name, "error": "pas assez d'annonces"}
+                )
+                continue
+
+            payload = self._plan_dict(plan)
+            plan_id = self.journal.save_plan(
+                payload, collection_id=cid, rarity=batch.rarity
+            )
+            batch.done.append({
+                "plan_id": plan_id,
+                "collection": col.name,
+                "cost": payload["cost"],
+                "net": payload["net"],
+                "profit": payload["profit"],
+                "roi": payload["roi"],
+                "outcomes": len(payload["outcomes"]),
+            })
+
+        if batch.state != "stopped":
+            batch.state = "finished"
+            batch.message = (
+                f"{len(batch.done)} plans calcules, {len(batch.failed)} echecs."
+            )
+
+    def batch_payload(self, batch: Batch) -> dict:
+        return {
+            "id": batch.id,
+            "rarity": batch.rarity,
+            "state": batch.state,
+            "message": batch.message,
+            "total": batch.total,
+            "remaining": len(batch.pending),
+            "progress": round(batch.progress, 3),
+            "elapsed": round(time.time() - batch.started),
+            "resume_in": max(0, round(batch.resume_at - time.time())),
+            "currency": self.currency,
+            # Les plus rentables d'abord : c'est la seule chose qu'on cherche.
+            "results": sorted(batch.done, key=lambda d: -d["profit"])[:40],
+            "failed": batch.failed[-10:],
+        }
+
     def job_payload(self, job: Job) -> dict:
         base = {
             "id": job.id,
@@ -175,8 +300,13 @@ class App:
         if job.state != "done" or job.plan is None:
             return base
 
-        p, r = job.plan, job.plan.result
-        base["plan"] = {
+        base["plan"] = self._plan_dict(job.plan)
+        return base
+
+    def _plan_dict(self, plan: Plan) -> dict:
+        """Serialise un plan, montants convertis dans la devise du compte."""
+        p, r = plan, plan.result
+        return {
             "collection": p.collection.name,
             "currency": self.currency,
             "cost": self.conv(r.cost),
@@ -219,7 +349,6 @@ class App:
                 for o in r.outcomes
             ],
         }
-        return base
 
     def contract_payload(self, c) -> dict:
         """Etat d'un contrat : le REEL confronte a ce qui etait prevu.
@@ -317,6 +446,12 @@ class Handler(BaseHTTPRequestHandler):
                 "started_at": self.app.started_at,
                 "currency": self.app.currency,
             })
+        elif route.path.startswith("/api/batch/"):
+            batch = self.app.batches.get(route.path.rsplit("/", 1)[-1])
+            if batch is None:
+                self._json({"error": "balayage inconnu"}, 404)
+                return
+            self._json(self.app.batch_payload(batch))
         elif route.path == "/api/history":
             self._json({"plans": self.app.journal.plans(limit=40)})
         elif route.path.startswith("/api/plan/"):
@@ -357,6 +492,26 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         j = self.app.journal
+        if chemin == "/api/batch":
+            rarity = corps.get("rarity", "mil-spec")
+            if rarity not in RARITES:
+                self._json({"error": "rarete inconnue"}, 400)
+                return
+            maxi = corps.get("max_outcomes")
+            batch = self.app.start_batch(
+                rarity, max_outcomes=int(maxi) if maxi else None
+            )
+            self._json({"batch": batch.id, "total": batch.total})
+            return
+        if chemin == "/api/batch/stop":
+            batch = self.app.batches.get(corps.get("batch", ""))
+            if batch is None:
+                self._json({"error": "balayage inconnu"}, 404)
+                return
+            batch.state = "stopped"
+            batch.message = "Interrompu."
+            self._json({"ok": True})
+            return
         if chemin == "/api/follow":
             try:
                 self._json({"contract": j.follow(corps.get("plan", ""))})
@@ -530,13 +685,20 @@ vertical-align:-2px;margin-right:7px}
     <label>Sorties max
       <select id="maxout">
         <option value="1">1 (résultat certain)</option>
-        <option value="2" selected>≤ 2</option>
+        <option value="2">≤ 2</option>
         <option value="3">≤ 3</option>
-        <option value="99">toutes</option>
+        <option value="5">≤ 5</option>
+        <option value="99" selected>toutes</option>
       </select>
     </label>
     <input id="filtre" placeholder="filtrer par nom…" style="flex:1;min-width:160px">
   </div>
+  <p class="muted" id="compte">…</p>
+  <div class="row" style="border-top:1px solid var(--line);padding-top:12px">
+    <button class="ghost" id="balayer">Tout calculer pour cette rareté</button>
+    <span class="muted" id="cout-balayage"></span>
+  </div>
+  <div id="balayage"></div>
   <div class="scroll"><table>
     <thead><tr><th>Collection</th><th class="num">Sorties</th>
       <th class="num">Probabilité</th><th class="num">Entrées</th>
@@ -604,6 +766,13 @@ function dessiner() {
   const q = $('#filtre').value.trim().toLowerCase();
   const vues = collections.filter(c => c.outcomes <= max &&
     (!q || c.name.toLowerCase().includes(q)));
+  // Sans ce compteur, un filtre actif donne l'impression que des collections
+  // manquent alors qu'elles sont simplement masquees.
+  const caches = collections.length - vues.length;
+  setTimeout(estimerBalayage, 0);
+  $('#compte').textContent = caches
+    ? `${vues.length} affichées sur ${collections.length} — ${caches} masquées par les filtres`
+    : `${collections.length} collections`;
   if (!vues.length) {
     $('#liste').innerHTML = '<tr><td colspan="6" class="muted">aucune collection</td></tr>';
     return;
@@ -753,6 +922,86 @@ function afficher(d) {
     </table></div>
   </div>`;
 }
+
+let sondageBatch = null;
+
+function estimerBalayage() {
+  const max = +$('#maxout').value;
+  const vues = collections.filter(c => c.outcomes <= max);
+  const req = vues.reduce((n, c) => n + c.requests, 0);
+  const h = req / 10 / 60;
+  $('#cout-balayage').textContent = vues.length
+    ? `${vues.length} collections, ~${req} requêtes CSFloat, soit ~${
+        h < 1 ? Math.round(h * 60) + ' min' : h.toFixed(1) + ' h'}`
+    : '';
+}
+
+$('#balayer').addEventListener('click', async () => {
+  const max = +$('#maxout').value;
+  const vues = collections.filter(c => c.outcomes <= max);
+  const req = vues.reduce((n, c) => n + c.requests, 0);
+  if (!confirm(`Calculer ${vues.length} collections ?\n\nEnviron ${req} requêtes ` +
+      `CSFloat, soit plusieurs heures. Le quota interrompra probablement le ` +
+      `balayage : il reprendra tout seul.\n\nLaissez le terminal ouvert.`)) return;
+
+  const r = await fetch('/api/batch', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rarity: $('#rarity').value, max_outcomes: max})
+  }).then(x => x.json());
+  if (r.error) { banniere(r.error, true); return; }
+  clearInterval(sondageBatch);
+  sondageBatch = setInterval(() => suivreBatch(r.batch), 5000);
+  suivreBatch(r.batch);
+});
+
+async function suivreBatch(id) {
+  const b = await fetch('/api/batch/' + id).then(x => x.json());
+  if (b.error) { clearInterval(sondageBatch); return; }
+
+  const pct = Math.round(b.progress * 100);
+  const fini = b.state === 'finished' || b.state === 'stopped';
+  if (fini) { clearInterval(sondageBatch); cacherBanniere(); }
+  else banniere(`Balayage ${pct}% — ${b.remaining} collections restantes` +
+    (b.state === 'paused' ? ` — quota épuisé, reprise dans ${b.resume_in}s` : ''));
+
+  const lignes = b.results.map(x => `<tr>
+    <td>${x.collection}</td>
+    <td class="num">${x.outcomes}</td>
+    <td class="num">${x.cost.toFixed(2)}</td>
+    <td class="num ${x.profit >= 0 ? 'pos' : 'neg'}">${
+      x.profit >= 0 ? '+' : ''}${x.profit.toFixed(2)}</td>
+    <td class="num ${x.profit >= 0 ? 'pos' : 'neg'}">${(x.roi * 100).toFixed(1)}%</td>
+    <td><button class="ghost sm" data-voir="${x.plan_id}">Voir</button>
+        <button class="sm" data-follow="${x.plan_id}">Suivre</button></td></tr>`).join('');
+
+  $('#balayage').innerHTML = `<div class="card">
+    <div class="row" style="justify-content:space-between">
+      <b>Balayage ${b.rarity} — ${pct}%</b>
+      ${fini ? '' : `<button class="ghost sm" data-stop="${b.id}">Arrêter</button>`}
+    </div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <p class="muted">${b.results.length} plans calculés, ${b.failed.length} échecs,
+      ${b.remaining} restantes &middot; ${Math.round(b.elapsed / 60)} min écoulées
+      ${b.message ? '&middot; ' + b.message : ''}</p>
+    ${lignes ? `<div class="scroll"><table>
+      <thead><tr><th>Collection</th><th class="num">Sorties</th>
+        <th class="num">Coût</th><th class="num">Profit</th>
+        <th class="num">Rendement</th><th></th></tr></thead>
+      <tbody>${lignes}</tbody></table></div>
+      <p class="muted">Classé par profit décroissant. Montants en ${b.currency}.</p>`
+      : '<p class="muted">Aucun résultat pour l\u2019instant.</p>'}
+  </div>`;
+}
+
+document.addEventListener('click', async e => {
+  const st = e.target.closest('[data-stop]');
+  if (st) {
+    await fetch('/api/batch/stop', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({batch: st.dataset.stop})});
+    suivreBatch(st.dataset.stop);
+  }
+});
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
