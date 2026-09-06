@@ -192,7 +192,11 @@ class Plan:
         """
         if self.result.ev_net <= 0:
             return None
-        return 1.0 - self.result.cost / self.result.ev_net
+        marge = 1.0 - self.result.cost / self.result.ev_net
+        # Sur un contrat deja perdant, cette "marge" est negative et n'a aucun
+        # sens : il n'y a pas de baisse a encaisser avant de perdre, on perd
+        # deja. Afficher "-120 %" laissait croire a un bug de calcul.
+        return marge if marge > 0 else None
 
     @property
     def float_slack(self) -> float:

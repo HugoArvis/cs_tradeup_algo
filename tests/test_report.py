@@ -147,3 +147,19 @@ def test_pas_de_porte_de_sortie_sans_prix_de_revente():
     plan = make_plan()
     assert plan.exit_value is None
     assert plan.exit_loss is None and plan.exit_loss_ratio is None
+
+
+def test_pas_de_marge_affichee_sur_un_contrat_perdant():
+    """Une "tolerance de baisse" negative n'a pas de sens.
+
+    Sur un contrat deja perdant il n'y a rien a encaisser avant de perdre.
+    L'affichage montrait "-120.7 %", ce qui ressemblait a un bug de calcul.
+    """
+    plan = make_plan()
+    assert plan.price_drop_tolerance is not None  # gagnant : marge reelle
+    assert plan.price_drop_tolerance > 0
+
+    perdant = make_plan()
+    object.__setattr__(perdant.result, "cost", 99.0)  # coute plus que la sortie
+    assert perdant.result.ev_profit < 0
+    assert perdant.price_drop_tolerance is None
