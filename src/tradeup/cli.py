@@ -254,6 +254,19 @@ def cmd_plan(args) -> int:
 
     print(f"\nCout {r.cost:.2f} | EV nette {r.ev_net:.2f} | "
           f"profit {r.ev_profit:+.2f} ({r.roi:+.1%})")
+    if plan.all_outcomes_profitable:
+        print(
+            f"\nTOUTES LES SORTIES SONT RENTABLES : quel que soit le skin obtenu,\n"
+            f"  vous gagnez entre {plan.worst_profit:+.2f} (pire cas) et "
+            f"{plan.best_profit:+.2f} (meilleur cas).\n"
+            f"  Le tirage ne peut pas vous faire perdre."
+        )
+    elif plan.worst_profit is not None:
+        print(
+            f"\nLE TIRAGE PEUT VOUS FAIRE PERDRE : selon la sortie, "
+            f"de {plan.worst_profit:+.2f} a {plan.best_profit:+.2f}."
+        )
+
     if plan.exit_loss is not None and r.ev_profit > 0:
         print(
             f"\nPORTE DE SORTIE : au bout des 7 jours les skins sont libres.\n"

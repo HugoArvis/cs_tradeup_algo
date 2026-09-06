@@ -157,6 +157,38 @@ class Plan:
 
     exit_value: float | None = None  # produit net d'une revente des entrees
 
+    # --- Ce qui compte vraiment : le pire cas couvre-t-il la mise ? ---
+
+    @property
+    def worst_profit(self) -> float | None:
+        """Profit de la PIRE sortie possible."""
+        if not self.result.outcomes:
+            return None
+        return min(o.net_value for o in self.result.outcomes) - self.result.cost
+
+    @property
+    def best_profit(self) -> float | None:
+        if not self.result.outcomes:
+            return None
+        return max(o.net_value for o in self.result.outcomes) - self.result.cost
+
+    @property
+    def all_outcomes_profitable(self) -> bool:
+        """Vrai si CHAQUE sortie couvre la mise : on gagne quoi qu'il arrive.
+
+        C'est le bon critere de securite, et il rend caduc le classement par
+        nombre de sorties. Un contrat a 3 issues toutes rentables vaut mieux
+        qu'un contrat a issue unique dont le gain est marginal : dans le premier
+        le tirage ne peut pas vous faire perdre, dans le second une variation de
+        prix suffit.
+
+        Le nombre de sorties reste utile AVANT d'avoir les prix -- c'est la
+        seule information disponible gratuitement -- mais il ne doit pas servir
+        de verdict une fois le plan calcule.
+        """
+        pire = self.worst_profit
+        return pire is not None and pire > 0
+
     @property
     def exit_loss(self) -> float | None:
         """Cout d'un renoncement : acheter les entrees puis les revendre.

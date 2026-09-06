@@ -264,6 +264,8 @@ class App:
                 "profit": payload["profit"],
                 "roi": payload["roi"],
                 "outcomes": len(payload["outcomes"]),
+                "worst_profit": payload.get("worst_profit"),
+                "all_profitable": payload.get("all_profitable", False),
             })
 
         if batch.state != "stopped":
@@ -319,6 +321,13 @@ class App:
             "downgrade_profit": (
                 self.conv(p.downgrade_profit) if p.downgrade_profit is not None else None
             ),
+            "worst_profit": (
+                self.conv(p.worst_profit) if p.worst_profit is not None else None
+            ),
+            "best_profit": (
+                self.conv(p.best_profit) if p.best_profit is not None else None
+            ),
+            "all_profitable": p.all_outcomes_profitable,
             "exit_loss": (
                 self.conv(p.exit_loss) if p.exit_loss is not None else None
             ),
@@ -872,6 +881,18 @@ function afficher(d) {
     entrées. Si une annonce part et que la remplaçante dépasse cette marge, la
     sortie perd un palier : <span class="neg">${p.downgrade_profit.toFixed(2)}</span>
     au lieu de <span class="pos">+${p.profit.toFixed(2)}</span>.</div>`);
+  if (p.all_profitable) {
+    avert.push(`<div class="warn" style="border-left-color:var(--pos)">
+      <b>Toutes les sorties sont rentables.</b> Quel que soit le skin obtenu,
+      vous gagnez : entre <b>+${p.worst_profit.toFixed(2)}</b> (pire cas) et
+      <b>+${p.best_profit.toFixed(2)}</b> (meilleur cas). Le tirage ne peut pas
+      vous faire perdre — seule une chute des prix le pourrait.</div>`);
+  } else if (p.worst_profit !== null && p.worst_profit !== undefined) {
+    avert.push(`<div class="warn">
+      <b>Le tirage peut vous faire perdre.</b> Selon la sortie obtenue, le
+      résultat va de <span class="neg">${p.worst_profit.toFixed(2)}</span> à
+      <span class="pos">+${p.best_profit.toFixed(2)}</span>.</div>`);
+  }
   if (p.exit_loss !== null && p.exit_loss !== undefined && p.profit > 0) {
     avert.push(`<div class="warn" style="border-left-color:var(--pos)">
       <b>Vous n'êtes pas engagé.</b> Au bout des 7 jours vos skins sont libres :
@@ -966,7 +987,8 @@ async function suivreBatch(id) {
 
   const lignes = b.results.map(x => `<tr>
     <td>${x.collection}</td>
-    <td class="num">${x.outcomes}</td>
+    <td class="num">${x.outcomes}${x.all_profitable
+      ? ' <span class="tag" style="background:#0f7a3d;color:#fff">toutes OK</span>' : ''}</td>
     <td class="num">${x.cost.toFixed(2)}</td>
     <td class="num ${x.profit >= 0 ? 'pos' : 'neg'}">${
       x.profit >= 0 ? '+' : ''}${x.profit.toFixed(2)}</td>
