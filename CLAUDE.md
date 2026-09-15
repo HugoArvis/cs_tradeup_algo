@@ -5,6 +5,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Code, commentaires et commits en français : sans accents dans le code Python,
 avec accents dans la documentation.
 
+## Début de session
+
+Avant toute autre chose, consulter le ClickUp du projet et relever les tâches
+ajoutées depuis la dernière session.
+
+Les traiter **une par une**, jamais en parallèle.
+
+Après chaque tâche terminée, faire un retour dans la conversation : ce qui a été
+fait, comment, et ce qui a été vérifié.
+
+Si le serveur MCP ClickUp est injoignable, le dire et demander quoi faire — ne
+jamais sauter la vérification en silence.
+
 ## Commandes
 
 ```bash
