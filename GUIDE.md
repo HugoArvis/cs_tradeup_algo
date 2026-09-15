@@ -77,9 +77,16 @@ Réduisez le champ avec « Sorties max » si vous voulez des résultats plus vit
 les collections à 1 ou 2 sorties sont de toute façon celles qui vous
 intéressent le plus.
 
-### Trois onglets
+### Quatre onglets
 
 **Calculer** — la liste des collections et le lancement des plans.
+
+**Mon inventaire** — les contrats réalisables avec les skins que vous possédez
+déjà. Les entrées y sont valorisées à ce qu'elles rapporteraient **revendues** :
+fondre un skin, c'est renoncer à le vendre. Ce que vous l'avez payé n'entre pas
+dans le calcul — c'est déjà dépensé quoi que vous décidiez. Conséquence à
+accepter : des contrats qui semblaient gratuits apparaissent perdants. Ils
+l'étaient déjà, le coût était seulement invisible.
 
 **Historique des plans** — tout plan calculé y est conservé automatiquement. Il
 a coûté des requêtes CSFloat, autant pouvoir le retrouver. Le bouton **Suivre**
