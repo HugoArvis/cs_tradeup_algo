@@ -50,6 +50,19 @@ RARITES = {
 }
 
 
+def libelle_rarete(nom: str | None) -> str:
+    """Libelle lisible d'une rarete stockee sous sa forme courte.
+
+    Le journal enregistre "mil-spec", les plans fraichement calcules exposent
+    "Mil-Spec Grade" : sans cette conversion, l'historique et les resultats du
+    jour afficheraient deux ecritures differentes de la meme chose. Une valeur
+    inconnue est rendue telle quelle plutot que masquee -- une vieille ligne
+    reste ainsi identifiable.
+    """
+    rarete = RARITES.get(str(nom or ""))
+    return rarete.label if rarete else str(nom or "")
+
+
 @dataclass
 class Job:
     """Un calcul de plan en cours ou termine."""
@@ -242,13 +255,17 @@ class App:
             except Exception as exc:  # noqa: BLE001
                 log.exception("Balayage : %s en echec", col.name)
                 batch.pending.pop(0)
-                batch.failed.append({"collection": col.name, "error": str(exc)})
+                batch.failed.append({"collection": col.name,
+                                     "rarity": RARITES[batch.rarity].label,
+                                     "error": str(exc)})
                 continue
 
             batch.pending.pop(0)
             if plan is None:
                 batch.failed.append(
-                    {"collection": col.name, "error": "pas assez d'annonces"}
+                    {"collection": col.name,
+                     "rarity": RARITES[batch.rarity].label,
+                     "error": "pas assez d'annonces"}
                 )
                 continue
 
@@ -259,6 +276,7 @@ class App:
             batch.done.append({
                 "plan_id": plan_id,
                 "collection": col.name,
+                "rarity": RARITES[batch.rarity].label,
                 "cost": payload["cost"],
                 "net": payload["net"],
                 "profit": payload["profit"],
@@ -310,6 +328,10 @@ class App:
         p, r = plan, plan.result
         return {
             "collection": p.collection.name,
+            # Une meme collection donne un plan different par rarete : sans
+            # elle, deux lignes de l'historique sont indiscernables.
+            "rarity": p.rarity.label,
+            "rarity_target": p.rarity.next_up.label,
             "currency": self.currency,
             "cost": self.conv(r.cost),
             "net": self.conv(r.ev_net),
@@ -371,6 +393,7 @@ class App:
             "plan_id": c.plan_id,
             "currency": self.currency,
             "collection": c.collection_name,
+            "rarity": libelle_rarete(c.rarity),
             "created_at": c.created_at,
             "status": c.status,
             "notes": c.notes,
@@ -462,7 +485,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(self.app.batch_payload(batch))
         elif route.path == "/api/history":
-            self._json({"plans": self.app.journal.plans(limit=40)})
+            plans = self.app.journal.plans(limit=40)
+            for ligne in plans:
+                ligne["rarity"] = libelle_rarete(ligne.get("rarity"))
+            self._json({"plans": plans})
         elif route.path.startswith("/api/plan/"):
             payload = self.app.journal.plan_payload(route.path.rsplit("/", 1)[-1])
             if payload is None:
@@ -915,7 +941,7 @@ function afficher(d) {
   ${avert.join('')}
   <div class="card">
     <div class="row" style="justify-content:space-between">
-      <b>${p.collection} — 10 annonces à acheter</b>
+      <b>${p.collection}${p.rarity ? ` <span class="tag">${p.rarity}</span>` : ''} — 10 annonces à acheter</b>
       <span><button class="sm" data-follow="${d.plan_id}">Suivre ce plan</button>
       ${d.id ? `<a class="buy" href="/report/${d.id}" target="_blank">Rapport imprimable</a>` : ''}</span>
     </div>
@@ -986,7 +1012,7 @@ async function suivreBatch(id) {
     (b.state === 'paused' ? ` — quota épuisé, reprise dans ${b.resume_in}s` : ''));
 
   const lignes = b.results.map(x => `<tr>
-    <td>${x.collection}</td>
+    <td>${x.collection}${x.rarity ? ` <span class="tag">${x.rarity}</span>` : ''}</td>
     <td class="num">${x.outcomes}${x.all_profitable
       ? ' <span class="tag" style="background:#0f7a3d;color:#fff">toutes OK</span>' : ''}</td>
     <td class="num">${x.cost.toFixed(2)}</td>
@@ -1040,7 +1066,8 @@ async function histo() {
   const d = await fetch('/api/history').then(x => x.json());
   const l = d.plans || [];
   $('#histo').innerHTML = l.length ? l.map(p => `<tr>
-    <td>${dt(p.created_at)}</td><td>${p.collection}</td>
+    <td>${dt(p.created_at)}</td>
+    <td>${p.collection}${p.rarity ? ` <span class="tag">${p.rarity}</span>` : ''}</td>
     <td class="num">${p.cost.toFixed(2)}</td>
     <td class="num ${p.profit >= 0 ? 'pos' : 'neg'}">${p.profit >= 0 ? '+' : ''}${p.profit.toFixed(2)}</td>
     <td class="num">${(p.roi * 100).toFixed(1)}%</td>
@@ -1096,7 +1123,9 @@ async function contrats() {
     }).join('');
 
     return '<div class="card"><div class="row" style="justify-content:space-between">' +
-      '<b>' + c.collection + '</b> ' + etat + '</div>' +
+      '<b>' + c.collection + '</b> ' +
+      (c.rarity ? '<span class="tag">' + c.rarity + '</span> ' : '') +
+      etat + '</div>' +
       '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
       '<p class="muted">Depense ' + c.spent.toFixed(2) + ' / prevu ' +
       c.planned_cost.toFixed(2) + ' &middot; cree le ' + dt(c.created_at) +

@@ -112,6 +112,9 @@ class Contract:
     notes: str
     items: tuple[Item, ...]
     collection_name: str
+    # Rarete d'entree du plan suivi. Deja stockee en base, elle n'etait pas
+    # remontee : deux contrats sur la meme collection etaient indiscernables.
+    rarity: str
     planned_cost: float
     planned_avg_float: float
     planned_profit: float
@@ -314,7 +317,7 @@ class Journal:
 
     def contract(self, contract_id: str) -> Contract | None:
         row = self._conn.execute(
-            """SELECT c.*, p.collection_name, p.cost, p.avg_float, p.profit
+            """SELECT c.*, p.collection_name, p.rarity, p.cost, p.avg_float, p.profit
                FROM contracts c JOIN plans p ON p.id = c.plan_id
                WHERE c.id = ?""",
             (contract_id,),
@@ -324,7 +327,7 @@ class Journal:
         return self._build_contract(row)
 
     def contracts(self, *, include_done: bool = True) -> list[Contract]:
-        sql = """SELECT c.*, p.collection_name, p.cost, p.avg_float, p.profit
+        sql = """SELECT c.*, p.collection_name, p.rarity, p.cost, p.avg_float, p.profit
                  FROM contracts c JOIN plans p ON p.id = c.plan_id"""
         if not include_done:
             sql += " WHERE c.status NOT IN ('realise', 'abandonne')"
@@ -348,7 +351,8 @@ class Journal:
         return Contract(
             id=row["id"], plan_id=row["plan_id"], created_at=row["created_at"],
             status=row["status"], notes=row["notes"], items=items,
-            collection_name=row["collection_name"], planned_cost=row["cost"],
+            collection_name=row["collection_name"], rarity=row["rarity"],
+            planned_cost=row["cost"],
             planned_avg_float=row["avg_float"], planned_profit=row["profit"],
         )
 

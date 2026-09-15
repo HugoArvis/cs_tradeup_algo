@@ -284,7 +284,10 @@ def cmd_plan(args) -> int:
         return 0
 
     r = plan.result
-    print(f"\n{col.name} -- {plan.listings_examined} offres examinees")
+    # La rarete sur stdout, et pas seulement dans l'en-tete stderr : c'est ce
+    # qu'on relit dans un fichier de sortie ou un copier-coller.
+    print(f"\n{col.name} [{plan.rarity.label} -> {plan.rarity.next_up.label}]"
+          f" -- {plan.listings_examined} offres examinees")
     print("Achat et revente sur CSFloat. Tous les montants sont en USD.\n")
     print("A ACHETER (offres reelles, floats exacts) :")
     for ligne in plan.shopping_lines():
@@ -373,7 +376,10 @@ def cmd_plan(args) -> int:
     if args.html is not None:
         chemin = args.html or (
             Path(__file__).resolve().parents[2] / "rapports"
-            / f"plan-{col.id}-{datetime.now():%Y%m%d-%H%M}.html"
+            # La rarete fait partie du nom : sans elle, deux plans de la meme
+            # collection calcules dans la meme minute s'ecrasaient, et rien ne
+            # distinguait les fichiers deja ecrits.
+            / f"plan-{col.id}-{args.rarity}-{datetime.now():%Y%m%d-%H%M}.html"
         )
         ecrit = write_and_open(plan, chemin, open_browser=not args.no_open)
         print(f"\nRapport : {ecrit}")

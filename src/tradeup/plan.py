@@ -180,6 +180,10 @@ class Plan:
     options: tuple[InputOption, ...]
     collection: Collection
     listings_examined: int
+    # La rarete d'ENTREE. Une meme collection donne un plan different par
+    # rarete, et rien ne les distinguait : ni le titre du rapport, ni son nom de
+    # fichier, ni l'historique. Deux plans pouvaient meme s'ecraser sur disque.
+    rarity: Rarity = Rarity.MIL_SPEC
 
     downgrade_net: float | None = None  # valeur nette si la sortie perd un palier
 
@@ -365,6 +369,7 @@ def build_plan(
                 result=result,
                 options=tuple(selection),
                 collection=collection,
+                rarity=rarity,
                 listings_examined=examinees,
                 downgrade_net=_net_si_palier_rate(result, pricer),
                 exit_value=_valeur_de_revente(selection, pricer, sell_fee),

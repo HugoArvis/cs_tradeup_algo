@@ -132,3 +132,13 @@ def test_limitation_du_nombre_doffres_par_skin():
     assert len(options) == 5
     # Les 5 moins cheres.
     assert [o.unit_cost for o in options] == [1.0, 2.0, 3.0, 4.0, 5.0]
+
+
+def test_le_plan_porte_la_rarete_dentree():
+    """Sans elle, rien en aval ne pouvait l'afficher : ni le rapport, ni le
+    nom du fichier, ni l'historique de l'application web."""
+    from tradeup.models import Rarity
+    from tradeup.plan import Plan
+
+    assert "rarity" in Plan.__dataclass_fields__
+    assert Plan.__dataclass_fields__["rarity"].default is Rarity.MIL_SPEC

@@ -207,3 +207,31 @@ def test_sortie_unique_rentable_reste_signalee():
     plan = make_plan()  # une sortie a 16.02 pour 11.40 de cout
     assert plan.all_outcomes_profitable
     assert plan.worst_profit == pytest.approx(plan.best_profit)
+
+
+# --- Rarete du plan ----------------------------------------------------------
+
+
+def test_le_rapport_affiche_la_rarete():
+    """Une meme collection donne un plan different par rarete.
+
+    Sans elle, deux rapports de "The Bank Collection" sont indiscernables --
+    et l'historique reel en contenait trois.
+    """
+    plan = make_plan()
+    page = render(plan, currency="USD")
+    assert plan.rarity.label in page
+    assert plan.rarity.next_up.label in page
+
+
+def test_chaque_rarete_produit_un_rapport_distinct():
+    """Deux plans de la meme collection ne doivent plus se confondre."""
+    import dataclasses
+
+    pages = {}
+    for rarete in (Rarity.CONSUMER, Rarity.INDUSTRIAL, Rarity.RESTRICTED):
+        page = render(dataclasses.replace(make_plan(), rarity=rarete),
+                      currency="USD")
+        assert rarete.label in page
+        pages[rarete] = page
+    assert len(set(pages.values())) == 3

@@ -193,3 +193,22 @@ def test_le_payload_de_contrat_ne_fuit_pas_la_cle(tmp_path):
     cid = j.follow(j.save_plan(plan, collection_id="col_a", rarity="mil-spec"))
     assert "secrete" not in json.dumps(app.contract_payload(j.contract(cid)))
     j.close()
+
+
+# --- Rarete affichee ---------------------------------------------------------
+
+
+def test_le_libelle_de_rarete_est_uniforme():
+    """Le journal stocke "mil-spec", un plan frais expose "Mil-Spec Grade".
+
+    Sans conversion, l'historique et les resultats du jour afficheraient deux
+    ecritures de la meme chose.
+    """
+    from tradeup.web import libelle_rarete
+
+    assert libelle_rarete("mil-spec") == "Mil-Spec Grade"
+    assert libelle_rarete("industrial") == "Industrial Grade"
+    # Une valeur inconnue reste lisible plutot que d'etre masquee : une vieille
+    # ligne d'historique doit rester identifiable.
+    assert libelle_rarete("rarete-disparue") == "rarete-disparue"
+    assert libelle_rarete(None) == ""

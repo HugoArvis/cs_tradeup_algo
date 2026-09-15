@@ -52,6 +52,12 @@ body {
 }
 .wrap { max-width: 880px; margin: 0 auto; }
 h1 { font-size: 24px; margin: 0 0 4px; }
+.rarete {
+  display: inline-block; vertical-align: middle; margin-left: 10px;
+  padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  white-space: nowrap;
+}
 .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
 .card {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
@@ -173,7 +179,9 @@ def render(plan: Plan, *, currency: str = "USD") -> str:
     return f"""<style>{_CSS}</style>
 <body data-generated="{now.isoformat()}">
 <div class="wrap">
-  <h1>{html.escape(plan.collection.name)}</h1>
+  <h1>{html.escape(plan.collection.name)}
+    <span class="rarete">{html.escape(plan.rarity.label)}
+      &rarr; {html.escape(plan.rarity.next_up.label)}</span></h1>
   <div class="sub">
     Plan genere <span id="age">a l'instant</span>
     &middot; {now.strftime('%d/%m/%Y %H:%M')}
