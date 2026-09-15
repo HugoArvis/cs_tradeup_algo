@@ -5,6 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Code, commentaires et commits en français : sans accents dans le code Python,
 avec accents dans la documentation.
 
+Ce fichier ne porte que ce qui **ne se déduit pas** du code : pièges
+d'environnement, règles du domaine issues de bugs mesurés, contraintes des API.
+Le reste vit ailleurs et n'a pas à être dupliqué ici — objectif, installation,
+état d'avancement et limites de modélisation dans `README.md`, mode d'emploi pas
+à pas dans `GUIDE.md`, travail restant dans le ClickUp du projet.
+
 ## Début de session
 
 Avant toute autre chose, consulter le ClickUp du projet et relever les tâches

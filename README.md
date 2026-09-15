@@ -208,7 +208,8 @@ valent pas si l'un peut perdre 80 % du capital.
 | Décote de sécurité sur la revente | `--margin` (5 %) | EV surestimée |
 | Float réellement trouvable dans un palier | `--float-pct` (0.15) | Contrats **non réalisables** |
 | Prix de vente = min(lowest, median) | `conservative_sell` | EV surestimée |
-| Float d'entrée = valeur choisie, pas tirée | `--float-safety` | **EV effondrée** (voir falaise) |
+| Float d'entrée = valeur choisie, pas tirée | `--float-safety`, ou `--float-model random` qui l'intègre | **EV effondrée** (voir falaise) |
+| Liquidité des entrées | `--min-input-volume` | Dix exemplaires introuvables au prix affiché |
 | Frais d'achat/revente | `--buy-fees`, `--sell-fees` | EV surestimée |
 | Liquidité de la sortie | `--min-volume` | Skin invendable au prix affiché |
 
@@ -226,32 +227,29 @@ n'achète pas un float précis — dans ce cas montez à `--float-pct 0.5`.
 | Moteur d'EV : distribution, float de sortie, EV nette, variance | fait |
 | Génération des combinaisons à scanner | fait (mono- et bi-collection) |
 | Filtrage / scoring / liquidité | fait |
-| Vérification des prix avant exécution | partiel — `price --fresh` à la main |
+| Vérification des prix avant exécution | fait — commande `verify`, alerte de dérive |
 | Liste d'achat actionnable + marge de falaise | fait |
 | Source CSFloat — parsing et sélection | testé (14 tests, client HTTP simulé) |
 | Source CSFloat — schéma de réponse | **vérifié sur l'API réelle** |
 | Commande `plan` : panier depuis les offres réelles | fait |
 | Rapport HTML avec liens directs vers les annonces | fait |
 | Application web locale (choix de collection, plans à la demande) | fait |
+| `scan` sur les prix CSFloat (achat et revente) | fait — `--buy-market`, `--sell-market` |
+| Float d'entrée traité comme variable aléatoire | fait — `--float-model random` |
+| Liquidité des ENTRÉES | fait — `--min-input-volume`, `sourcing_days` |
+| Contrats StatTrak | fait — `--stattrak` |
 | Buff163 | non commencé |
 
 ### Prochaines étapes suggérées
 
-1. **Brancher CSFloat aussi dans `scan`.** La commande `plan` utilise les prix
-   et floats réels, mais `scan` reste sur Steam. Un scan CSFloat de bout en bout
-   éviterait de passer par un pré-filtrage Steam dont les prix ne sont pas ceux
-   du marché d'exécution.
-2. **Commande `verify`** : reprendre un candidat, rafraîchir toutes ses
-   cotations, et refuser si l'EV a bougé de plus de X %.
-3. **Modéliser le float d'entrée comme une variable aléatoire.** `--float-safety`
-   est un pansement déterministe. Le traitement correct : tirer les floats,
-   propager la distribution jusqu'à l'EV, et reporter P(la sortie tombe dans le
-   palier visé). C'est l'amélioration la plus utile après CSFloat.
-4. **Vérifier la liquidité des ENTRÉES.** `--min-volume` ne filtre que les
-   sorties. Un contrat exigeant 8 exemplaires d'un skin qui s'échange 3 fois par
-   jour n'est pas exécutable.
-5. **StatTrak** : le moteur accepte le drapeau, mais la base ne distingue pas
-   encore les collections sans variante ST.
+1. **Calculer les trade-ups depuis l'inventaire possédé**, et non depuis le
+   marché entier : les skins déjà en stock ont un coût déjà payé, ce qui change
+   l'arbitrage.
+2. **Buff163** comme troisième marché, notamment à la revente.
+3. **Mesurer la loi réelle des floats d'entrée.** `--float-model random` les
+   suppose uniformes dans leur palier. C'est l'hypothèse honnête faute de
+   données, mais la distribution réelle des floats en circulation n'est
+   probablement pas plate — un relevé sur les annonces CSFloat le dirait.
 
 ## Tests
 
