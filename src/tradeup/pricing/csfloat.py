@@ -213,6 +213,19 @@ class CSFloat(PriceSource):
 
         return [l for l in (_vers_listing(r, market_hash_name) for r in rows) if l]
 
+    def inventory(self) -> list[dict]:
+        """Inventaire CS2 du compte, floats inclus.
+
+        C'est la seule source qui donne le float des objets DEJA POSSEDES :
+        l'inventaire Steam ne renvoie que des noms de marche. Sans float, un
+        objet possede ne peut pas entrer dans un calcul de trade-up, puisque
+        c'est la moyenne des floats qui decide de l'usure de sortie.
+
+        Renvoie les lignes brutes de l'API ; `inventory.py` les interprete.
+        """
+        data = self.client.get_json(f"{API_ROOT}/me/inventory")
+        return [row for row in (data or []) if isinstance(row, dict)]
+
     def account_currency(self) -> str | None:
         """Devise d'affichage du compte CSFloat.
 

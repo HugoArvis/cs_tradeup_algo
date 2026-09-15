@@ -118,6 +118,20 @@ les expose pour dire combien de temps une revente prendra.
 **`all_outcomes_profitable` prime sur le nombre de sorties** — trois issues
 toutes rentables valent mieux qu'une issue unique au gain marginal.
 
+**Un skin possédé coûte ce qu'il vaut à la revente, pas ce qu'on l'a payé.** Le
+prix d'achat est irrécupérable et ne doit peser sur aucune décision ; le compter
+à zéro (« je l'ai déjà ») rend tout contrat rentable et pousse à fondre des skins
+qui valaient mieux vendus. `inventory.best_tradeups` valorise donc les entrées à
+`sell_net` — fondre, c'est renoncer à vendre. Beaucoup de contrats « gratuits »
+apparaissent alors perdants : c'est le résultat correct, le coût était seulement
+invisible.
+
+Un objet possédé a un float **exact** (σ = 0) et est **unique** (sélection 0/1).
+`/me/inventory` sur CSFloat est la seule source qui donne ces floats — Steam ne
+renvoie que des noms. `tradable` y porte le verrou de 7 jours, et un **Souvenir
+ne peut jamais entrer dans un contrat** (règle du jeu, testée explicitement :
+sans ça il n'était écarté que faute d'être reconnu, ce qui est un accident).
+
 **Un contrat StatTrak ne mélange rien** : entrées StatTrak, sorties StatTrak, et
 `StatTrak™ AK-47 | Redline (FT)` est un **autre objet de marché** avec son prix
 et son volume. `--stattrak` filtre entrées et sorties (`inputs_for_rarity`,

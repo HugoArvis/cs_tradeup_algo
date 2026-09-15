@@ -55,6 +55,18 @@ def uniform_sigma(lo: float, hi: float) -> float:
     return max(0.0, hi - lo) / _SQRT_12
 
 
+def _float_connu(option) -> bool:
+    """Le float de cette option est-il exact plutot que suppose ?
+
+    Vrai pour une annonce identifiee comme pour un objet deja possede : dans
+    les deux cas l'objet existe et son float est lu, pas tire.
+    """
+    exact = getattr(option, "exact_float", None)
+    if exact is not None:
+        return bool(exact)
+    return bool(getattr(option, "listing_id", None))
+
+
 def _normalized_span(option) -> tuple[float, float]:
     """Bornes NORMALISEES du float qu'un achat de ce palier peut donner."""
     skin: Skin = option.skin
@@ -77,7 +89,7 @@ def option_sigma(option) -> float:
     donc sigma nul. Sans identifiant, on achete un palier et le float est
     uniforme sur la portion de ce palier que le range du skin autorise.
     """
-    if getattr(option, "listing_id", None):
+    if _float_connu(option):
         return 0.0
     return uniform_sigma(*_normalized_span(option))
 
@@ -93,7 +105,7 @@ def option_mu(option) -> float:
 
     Une offre identifiee garde son float exact : elle n'est pas tiree.
     """
-    if getattr(option, "listing_id", None):
+    if _float_connu(option):
         return option.skin.normalized(option.float_value)
     lo, hi = _normalized_span(option)
     return (lo + hi) / 2.0
@@ -148,7 +160,7 @@ def excess_kurtosis(options: Sequence[object]) -> float:
 
 def _largeur(option) -> float:
     """Largeur normalisee du tirage d'une option (0 si le float est connu)."""
-    if getattr(option, "listing_id", None):
+    if _float_connu(option):
         return 0.0
     lo, hi = _normalized_span(option)
     return max(0.0, hi - lo)

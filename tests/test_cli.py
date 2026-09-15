@@ -195,3 +195,17 @@ def test_inspect_refuse_une_collection_sans_stattrak(capsys):
                      "--stattrak"])
     assert code == 1
     assert "StatTrak" in capsys.readouterr().err
+
+
+def test_inventory_est_declaree():
+    a = parse("inventory", "--file", "x.json", "--rarity", "industrial")
+    assert a.func is cli.cmd_inventory
+    assert a.file == "x.json"
+    assert a.show_losing is False
+    # On ne choisit pas ce qu'on possede deja : pas de filtre de volume impose.
+    assert a.min_volume == 0
+
+
+def test_inventory_fichier_absent(capsys):
+    assert cli.main(["inventory", "--file", "inexistant.json"]) == 1
+    assert "introuvable" in capsys.readouterr().err.lower()

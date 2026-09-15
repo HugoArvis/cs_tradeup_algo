@@ -52,10 +52,21 @@ class InputOption:
     unit_cost: float
     float_value: float
     listing_id: str | None = None
+    owned: bool = False  # deja dans l'inventaire : rien a acheter
 
     @property
     def name(self) -> str:
         return self.skin.market_hash_name(self.wear)
+
+    @property
+    def exact_float(self) -> bool:
+        """Le float est-il connu, ou seulement suppose ?
+
+        Une annonce et un objet possede portent leur float exact ; une option
+        construite depuis un palier d'usure ne porte qu'une hypothese. La
+        distinction decide s'il reste un alea a modeliser (voir `floatrisk`).
+        """
+        return bool(self.listing_id) or self.owned
 
     @property
     def normalized(self) -> float:
@@ -69,8 +80,14 @@ class InputOption:
 
     @property
     def url(self) -> str | None:
-        """Lien direct vers l'annonce, quand elle est identifiee."""
-        return f"https://csfloat.com/item/{self.listing_id}" if self.listing_id else None
+        """Lien direct vers l'annonce, quand il y en a une a acheter.
+
+        Un objet deja possede n'a pas d'annonce : pointer csfloat.com/item avec
+        son asset_id menerait vers une page qui n'existe pas.
+        """
+        if self.owned or not self.listing_id:
+            return None
+        return f"https://csfloat.com/item/{self.listing_id}"
 
 
 @dataclass(frozen=True, slots=True)

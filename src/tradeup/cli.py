@@ -26,6 +26,13 @@ from .pricing.steam import CURRENCIES, SteamMarket
 from .plan import build_plan
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
+from .inventory import (
+    best_tradeups as best_inventory_tradeups,
+    closest_gaps as inventory_gaps,
+    from_csfloat_rows,
+    load_file as load_inventory_file,
+    summary as inventory_summary,
+)
 from .refresh import DEFAULT_DRIFT_THRESHOLD, collection_roles, refresh_quotes
 from .report import write_and_open
 from .scan import prefetch, required_market_names, scan
@@ -567,6 +574,98 @@ def cmd_scan(args) -> int:
     return 0
 
 
+def cmd_inventory(args) -> int:
+    """Meilleurs contrats realisables avec les skins deja possedes."""
+    db = SkinDatabase.load(args.db)
+    cache = QuoteCache(ttl_seconds=args.ttl * 3600)
+
+    try:
+        if args.file:
+            items = load_inventory_file(args.file)
+            source_nom = str(args.file)
+        else:
+            key = csfloat_api_key(args.api_key)
+            if not key:
+                print(
+                    "Cle API CSFloat absente. Renseigne-la dans .env, ou passe "
+                    "un inventaire exporte :\n"
+                    "  python -m tradeup.cli inventory --file inventaire.json",
+                    file=sys.stderr,
+                )
+                return 1
+            source = CSFloat(key, cache=cache, calls_per_minute=args.rate)
+            items = from_csfloat_rows(source.inventory())
+            source_nom = "CSFloat"
+    except (FileNotFoundError, ValueError) as exc:
+        print(exc, file=sys.stderr)
+        cache.close()
+        return 1
+
+    bilan = inventory_summary(db, items)
+    print(f"Inventaire ({source_nom}) : {bilan['objets']} objets, "
+          f"{bilan['utilisables']} utilisables en contrat", file=sys.stderr)
+    for cle, libelle in (("sans_float", "sans float"),
+                         ("verrouilles", "non echangeables (verrou 7 jours)"),
+                         ("souvenirs", "Souvenir (interdits en contrat)"),
+                         ("en_vente", "actuellement en vente")):
+        if bilan[cle]:
+            print(f"  {bilan[cle]} {libelle}", file=sys.stderr)
+    if bilan["par_rarete"]:
+        print("  par rarete : " + ", ".join(
+            f"{n} {r}" for r, n in bilan["par_rarete"].items()), file=sys.stderr)
+
+    # La valorisation passe par le marche choisi : un objet possede vaut ce
+    # qu'on en tirerait en le revendant, pas ce qu'on l'a paye.
+    pricer, cache2 = _make_pricer(args)
+    rarity = RARITY_ALIASES[args.rarity]
+
+    plans = best_inventory_tradeups(
+        db, items, pricer, rarity,
+        stattrak=args.stattrak,
+        limit=args.limit,
+        include_losing=args.show_losing,
+    )
+
+    if not plans:
+        print(
+            f"Aucun contrat realisable en {rarity.label} avec cet inventaire.\n"
+            "Il faut 10 objets de la MEME collection a cette rarete, "
+            "echangeables et cotes.",
+        )
+        # Chiffrer l'ecart : sinon ce message est indiscernable d'un bug.
+        proches = inventory_gaps(db, items, rarity, stattrak=args.stattrak)
+        if proches:
+            print("\nLe plus proche du compte :")
+            for nom, n in proches:
+                print(f"  {n:>2}/10  {nom}   (il en manque {10 - n})")
+        else:
+            print("\nAucun objet de cette rarete dans l'inventaire.")
+        if not args.show_losing:
+            print("\nAjoute --show-losing pour voir aussi les contrats perdants.")
+        cache.close()
+        cache2.close()
+        return 0
+
+    print(f"\n{len(plans)} contrat(s) realisable(s) -- montants en "
+          f"{args.currency}.")
+    print(
+        "Les entrees sont valorisees a ce qu'elles rapporteraient REVENDUES : "
+        "\nfondre un skin, c'est renoncer a le vendre.\n"
+    )
+    for i, plan in enumerate(plans, 1):
+        print(f"[{i}] {plan.report()}")
+        if args.detail:
+            print()
+            print(plan.inputs_table())
+            print()
+            print(explain(plan.result))
+        print()
+
+    cache.close()
+    cache2.close()
+    return 0
+
+
 def cmd_verify(args) -> int:
     """Recote des objets et dit ce qui a bouge depuis le dernier releve.
 
@@ -796,6 +895,30 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-open", action="store_true",
                    help="ecrire la page sans ouvrir le navigateur")
     s.set_defaults(func=cmd_plan)
+
+    s = sub.add_parser(
+        "inventory",
+        help="meilleurs contrats realisables avec les skins deja possedes")
+    s.add_argument("--file", default=None, metavar="FICHIER",
+                   help="inventaire exporte (JSON ou CSV) ; sinon lu sur CSFloat")
+    s.add_argument("--rarity", default="mil-spec", choices=sorted(RARITY_ALIASES))
+    s.add_argument("--stattrak", action="store_true")
+    s.add_argument("--limit", type=int, default=10)
+    s.add_argument("--detail", action="store_true")
+    s.add_argument("--show-losing", action="store_true",
+                   help="montrer aussi les contrats qui detruisent de la valeur")
+    s.add_argument("--offline", action="store_true", help="n'utiliser que le cache")
+    s.add_argument("--margin", type=float, default=0.05)
+    s.add_argument("--min-volume", type=int, default=0,
+                   help="volume minimal pour compter une sortie (0 par defaut : "
+                        "on ne choisit pas ce qu'on possede deja)")
+    s.add_argument("--buy-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--sell-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--sell-market", default="steam", choices=("steam", "csfloat"),
+                   help="marche ou l'on valorise entrees et sorties")
+    s.add_argument("--api-key", default=None, help="sinon lue depuis .env")
+    add_pricing_args(s)
+    s.set_defaults(func=cmd_inventory)
 
     s = sub.add_parser("verify",
                        help="recoter et mesurer la derive depuis le dernier releve")

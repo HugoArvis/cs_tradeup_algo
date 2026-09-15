@@ -238,15 +238,13 @@ n'achète pas un float précis — dans ce cas montez à `--float-pct 0.5`.
 | Float d'entrée traité comme variable aléatoire | fait — `--float-model random` |
 | Liquidité des ENTRÉES | fait — `--min-input-volume`, `sourcing_days` |
 | Contrats StatTrak | fait — `--stattrak` |
+| Trade-ups depuis l'inventaire possédé | fait — commande `inventory` |
 | Buff163 | non commencé |
 
 ### Prochaines étapes suggérées
 
-1. **Calculer les trade-ups depuis l'inventaire possédé**, et non depuis le
-   marché entier : les skins déjà en stock ont un coût déjà payé, ce qui change
-   l'arbitrage.
-2. **Buff163** comme troisième marché, notamment à la revente.
-3. **Mesurer la loi réelle des floats d'entrée.** `--float-model random` les
+1. **Buff163** comme troisième marché, notamment à la revente.
+2. **Mesurer la loi réelle des floats d'entrée.** `--float-model random` les
    suppose uniformes dans leur palier. C'est l'hypothèse honnête faute de
    données, mais la distribution réelle des floats en circulation n'est
    probablement pas plate — un relevé sur les annonces CSFloat le dirait.
