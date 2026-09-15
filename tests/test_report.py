@@ -34,6 +34,7 @@ def make_plan(options=None, downgrade_net=3.65):
         inputs=tuple(InputItem(o.skin, o.float_value, o.unit_cost) for o in options),
         cost=sum(o.unit_cost for o in options),
         avg_input_float=0.0745,
+        avg_normalized=0.0745,
         stattrak=False,
         unpriced_probability=0.0,
         cliff_distance=0.005,

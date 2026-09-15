@@ -23,6 +23,7 @@ def make_result(outcomes, cost=20.0, inputs=None):
         inputs=inputs,
         cost=cost,
         avg_input_float=0.05,
+        avg_normalized=0.05,
         stattrak=False,
         unpriced_probability=0.0,
     )

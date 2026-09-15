@@ -10,7 +10,7 @@ avec accents dans la documentation.
 ```bash
 python -m pip install -e ".[dev]"     # `pip` seul vise Python 3.9, pas 3.11
 python -m scripts.build_db            # (re)construit data/collections.json
-python -m pytest -q                   # 143 tests, < 15 s
+python -m pytest -q                   # 150 tests, < 15 s
 python -m pytest tests/test_core.py -k probabilites
 python scripts/check_js.py            # apres toute retouche du JS de web.py
 python -m tradeup.web                 # application locale, port 8765
@@ -61,9 +61,11 @@ Chacune vient d'un bug mesuré ; les tests les verrouillent.
 **Probabilité d'une sortie** : `P(s ∈ C) = n_C / Σ n_C' × k_C'`. Une collection
 à peu de sorties est globalement *moins* probable, pas plus.
 
-**Float de sortie** : moyenne des floats **absolus** des entrées, remappée sur
-le range du skin de **sortie**. Un skin à `min_float = 0.10` ne sort jamais en
-Factory New.
+**Float de sortie** : moyenne des floats **normalisés** — chaque entrée ramenée
+à `(float − min_skin) / (max_skin − min_skin)` — puis remappée sur le range du
+skin de **sortie**. Moyenner les floats affichés est faux : sur un contrat réel,
+0,0789 de moyenne affichée valait 0,4011 en normalisé et a produit du Minimal
+Wear là où le calcul annonçait Factory New.
 
 **Exclure les objets stickés de la valorisation** — une sortie de contrat naît
 nue. Les compter valorisait une Five-SeveN Candy Apple 582 USD contre 85 réels.

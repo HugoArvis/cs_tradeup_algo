@@ -12,7 +12,12 @@ from tradeup.generator import InputOption, cheapest_selection
 from tradeup.models import Rarity, Skin, Wear
 from tradeup.pricing.base import parse_money, parse_volume
 from tradeup.pricing.repository import StaticPricer
-from tradeup.wear import output_float, wear_breakpoints, wear_of
+from tradeup.wear import (
+    average_normalized,
+    output_float,
+    wear_breakpoints,
+    wear_of,
+)
 
 
 def make_skin(key, rarity=Rarity.MIL_SPEC, lo=0.0, hi=1.0, collection="col_a"):
@@ -274,3 +279,57 @@ def test_deux_devises_coexistent_dans_le_cache(tmp_path):
     assert cache.get("X", "steam", currency="EUR").lowest_price == 10.0
     assert cache.get("X", "steam", currency="USD").lowest_price == 11.5
     cache.close()
+
+
+# --- Le float de sortie : ancrage sur un contrat REELLEMENT execute ----------
+
+
+def test_la_moyenne_porte_sur_les_floats_NORMALISES():
+    """Reproduit un contrat reel, au cinq-millieme pres.
+
+    The Bank Collection, Industrial -> Mil-Spec. Dix entrees affichant 0.0789 de
+    moyenne ont produit un Desert Eagle Meteorite a float 0.0722, soit Minimal
+    Wear. La moyenne des floats ABSOLUS predisait 0.0142, donc Factory New, et
+    une sortie valorisee 1.16 EUR au lieu de 0.73 reels.
+
+    Ce test existe parce que l'erreur a coute un contrat.
+    """
+    nova = make_skin("nova", lo=0.0, hi=0.200)
+    ump = make_skin("ump", lo=0.0, hi=0.120)
+    cible = make_skin("deagle", Rarity.MIL_SPEC, lo=0.0, hi=0.180)
+
+    entrees = [(nova, f) for f in (0.0750, 0.0785, 0.0801, 0.0835, 0.0835,
+                                   0.0845, 0.0873, 0.0891, 0.1076)]
+    entrees.append((ump, 0.0199))
+
+    # Les floats affiches moyennent 0.0789...
+    assert sum(f for _, f in entrees) / 10 == pytest.approx(0.0789)
+    # ...mais chacun compte pour sa position dans SON range.
+    assert average_normalized(entrees) == pytest.approx(0.40113, abs=1e-5)
+
+    assert output_float(average_normalized(entrees), cible) == pytest.approx(
+        0.0722, abs=5e-5
+    )
+    assert wear_of(output_float(average_normalized(entrees), cible)) is Wear.MINIMAL_WEAR
+
+
+def test_un_float_identique_ne_pese_pas_pareil_selon_le_range():
+    """Deux objets au meme float affiche, deux poids differents."""
+    etroit = make_skin("etroit", lo=0.0, hi=0.20)  # 0.05 est a 25 % du range
+    large = make_skin("large", lo=0.0, hi=1.00)    # 0.05 est a 5 % du range
+
+    assert etroit.normalized(0.05) == pytest.approx(0.25)
+    assert large.normalized(0.05) == pytest.approx(0.05)
+    assert average_normalized([(etroit, 0.05)]) > average_normalized([(large, 0.05)])
+
+
+def test_normalisation_aux_bornes_et_range_decale():
+    decale = make_skin("decale", lo=0.10, hi=0.60)
+    assert decale.normalized(0.10) == pytest.approx(0.0)
+    assert decale.normalized(0.60) == pytest.approx(1.0)
+    assert decale.normalized(0.35) == pytest.approx(0.5)
+
+
+def test_moyenne_normalisee_refuse_une_entree_vide():
+    with pytest.raises(ValueError, match="Aucune entree"):
+        average_normalized([])

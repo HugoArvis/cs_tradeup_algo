@@ -356,7 +356,7 @@ def build_plan(
             InputItem(skin=o.skin, float_value=o.float_value, unit_cost=o.unit_cost)
             for o in selection
         ]
-        atteint = sum(o.float_value for o in selection) / TRADEUP_INPUT_COUNT
+        atteint = sum(o.normalized for o in selection) / TRADEUP_INPUT_COUNT
         result = evaluate(
             items, outcomes_map, pricer, cliff_distance=hi - atteint
         )
@@ -498,7 +498,7 @@ def plan_series(
             sel = cheapest_unique_selection(restant, TRADEUP_INPUT_COUNT, budget)
             if sel is None:
                 continue
-            moyenne = sum(o.float_value for o in sel) / TRADEUP_INPUT_COUNT
+            moyenne = sum(o.normalized for o in sel) / TRADEUP_INPUT_COUNT
             usure = wear_of(moyenne * cible.float_span + cible.min_float)
             asks = sorted(
                 o.price for o in source.listings(

@@ -5,8 +5,8 @@ Reference des regles de trade-up modelisees ici :
     jamais de Souvenir).
   - La sortie est un skin de la rarete immediatement superieure, tire parmi les
     collections representees en entree.
-  - Le float de sortie derive de la MOYENNE ARITHMETIQUE des floats d'entree
-    (voir wear.py).
+  - Le float de sortie derive de la moyenne des floats NORMALISES des entrees
+    -- chacun rapporte au range de son propre skin (voir `Skin.normalized`).
 """
 
 from __future__ import annotations
@@ -144,6 +144,19 @@ class Skin:
     @property
     def float_span(self) -> float:
         return self.max_float - self.min_float
+
+    def normalized(self, float_value: float) -> float:
+        """Position du float dans le range PROPRE de ce skin, entre 0 et 1.
+
+        C'est cette valeur, et non le float absolu, qui entre dans la moyenne
+        d'un trade-up. Un Nova Caged Steel a 0.075 sur un range 0-0.20 vaut 0.375
+        normalise ; le meme float sur un range 0-1 vaudrait 0.075. Confondre les
+        deux fait predire une sortie Factory New la ou le jeu produit du Minimal
+        Wear -- verifie sur un contrat reel au cinq-millieme pres.
+        """
+        if self.float_span <= 0:
+            return 0.0
+        return (float_value - self.min_float) / self.float_span
 
     def available_wears(self) -> tuple[Wear, ...]:
         """Paliers d'usure reellement atteignables compte tenu du range."""

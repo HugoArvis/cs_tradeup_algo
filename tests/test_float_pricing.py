@@ -152,6 +152,7 @@ def test_tolerance_a_la_baisse_de_prix():
         inputs=tuple(InputItem(entree, 0.05, 1.141) for _ in range(10)),
         cost=11.41,
         avg_input_float=0.05,
+        avg_normalized=0.05,
         stattrak=False,
         unpriced_probability=0.0,
     )
@@ -171,7 +172,8 @@ def test_pas_de_tolerance_si_la_sortie_ne_vaut_rien():
                   min_float=0.0, max_float=1.0)
     result = TradeUpResult(
         outcomes=(), inputs=tuple(InputItem(entree, 0.05, 1.0) for _ in range(10)),
-        cost=10.0, avg_input_float=0.05, stattrak=False, unpriced_probability=0.0,
+        cost=10.0, avg_input_float=0.05,
+        avg_normalized=0.05, stattrak=False, unpriced_probability=0.0,
     )
     plan = Plan(result=result, options=(), collection=None, listings_examined=0)
     assert plan.price_drop_tolerance is None

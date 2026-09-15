@@ -2,13 +2,15 @@
 
 Formule officielle du contrat d'echange :
 
-    avg = (1/10) * somme des floats absolus des 10 entrees
-    float_sortie = avg * (max_float_cible - min_float_cible) + min_float_cible
+    normalise_i = (float_i - min_i) / (max_i - min_i)     pour chaque entree
+    avg          = (1/10) * somme des normalise_i
+    float_sortie = avg * (max_cible - min_cible) + min_cible
 
-Deux pieges classiques, evites ici :
-  1. La moyenne porte sur les floats ABSOLUS des entrees, pas sur leur position
-     normalisee dans leur propre range.
-  2. Le remap utilise le range du skin de SORTIE, pas celui des entrees.
+Deux pieges, dont un a coute un contrat reel :
+  1. La moyenne porte sur les floats NORMALISES, pas sur les floats affiches.
+     Moyenner les floats bruts fait predire du Factory New la ou le jeu produit
+     du Minimal Wear.
+  2. Le remap final utilise le range du skin de SORTIE, pas celui des entrees.
 """
 
 from __future__ import annotations
@@ -20,18 +22,35 @@ from .models import WEARS_ORDERED, Skin, Wear
 TRADEUP_INPUT_COUNT = 10
 
 
-def average_float(floats: Sequence[float]) -> float:
-    """Moyenne arithmetique des floats d'entree."""
-    if not floats:
-        raise ValueError("Aucun float fourni")
-    return sum(floats) / len(floats)
+def average_normalized(entrees: Sequence[tuple[Skin, float]]) -> float:
+    """Moyenne des floats NORMALISES, chacun rapporte au range de son skin.
+
+    C'est la grandeur qui pilote le float de sortie. Voir `output_float` pour
+    pourquoi la moyenne des floats absolus donne un resultat faux.
+    """
+    if not entrees:
+        raise ValueError("Aucune entree fournie")
+    return sum(skin.normalized(f) for skin, f in entrees) / len(entrees)
 
 
-def output_float(avg_input_float: float, target: Skin) -> float:
-    """Float du skin obtenu, pour une moyenne d'entree donnee."""
-    if not 0.0 <= avg_input_float <= 1.0:
-        raise ValueError(f"Moyenne de float hors [0, 1] : {avg_input_float}")
-    return avg_input_float * target.float_span + target.min_float
+def output_float(avg_normalized_float: float, target: Skin) -> float:
+    """Float du skin obtenu, a partir de la moyenne NORMALISEE des entrees.
+
+        float_sortie = moyenne_normalisee x (max_cible - min_cible) + min_cible
+
+    Le premier argument n'est PAS la moyenne des floats affiches. Chaque entree
+    doit d'abord etre ramenee a sa position dans son propre range :
+    `(float - min_skin) / (max_skin - min_skin)`.
+
+    La distinction n'est pas theorique. Sur un contrat reellement execute, dix
+    entrees affichant 0.0789 de moyenne mais 0.4011 en normalise ont produit un
+    Desert Eagle Meteorite a float 0.0722 -- Minimal Wear. La moyenne des floats
+    absolus predisait 0.0142, soit Factory New, et une sortie valorisee 1.16 EUR
+    au lieu de 0.73 reels.
+    """
+    if not 0.0 <= avg_normalized_float <= 1.0:
+        raise ValueError(f"Moyenne normalisee hors [0, 1] : {avg_normalized_float}")
+    return avg_normalized_float * target.float_span + target.min_float
 
 
 def wear_of(float_value: float) -> Wear:
@@ -44,8 +63,8 @@ def wear_of(float_value: float) -> Wear:
     return Wear.BATTLE_SCARRED  # float == 1.0
 
 
-def output_wear(avg_input_float: float, target: Skin) -> Wear:
-    return wear_of(output_float(avg_input_float, target))
+def output_wear(avg_normalized_float: float, target: Skin) -> Wear:
+    return wear_of(output_float(avg_normalized_float, target))
 
 
 def required_average_for_wear(target: Skin, wear: Wear) -> tuple[float, float] | None:
@@ -83,11 +102,3 @@ def wear_breakpoints(targets: Iterable[Skin]) -> list[float]:
                         points.add(round(avg, 12))
     return sorted(points)
 
-
-def feasible_average_range(inputs: Sequence[Skin]) -> tuple[float, float]:
-    """Bornes de la moyenne atteignable pour un lot d'entrees donne."""
-    if len(inputs) != TRADEUP_INPUT_COUNT:
-        raise ValueError(f"Il faut exactement {TRADEUP_INPUT_COUNT} entrees")
-    lo = sum(s.min_float for s in inputs) / len(inputs)
-    hi = sum(s.max_float for s in inputs) / len(inputs)
-    return (lo, hi)

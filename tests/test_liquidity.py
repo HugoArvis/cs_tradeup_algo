@@ -41,7 +41,8 @@ def make_result(inputs=None, outcomes=None, cost=10.0):
                 probability=1.0, net_value=15.0, priced=True),
     )
     return TradeUpResult(outcomes=outcomes, inputs=inputs, cost=cost,
-                         avg_input_float=0.05, stattrak=False,
+                         avg_input_float=0.05,
+        avg_normalized=0.05, stattrak=False,
                          unpriced_probability=0.0)
 
 

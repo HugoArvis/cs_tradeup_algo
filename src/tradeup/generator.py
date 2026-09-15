@@ -51,6 +51,16 @@ class InputOption:
         return self.skin.market_hash_name(self.wear)
 
     @property
+    def normalized(self) -> float:
+        """Position du float dans le range du skin : la valeur qui compte.
+
+        La DP contraint la somme des NORMALISES, pas celle des floats affiches.
+        Deux objets au meme float mais de ranges differents ne pesent pas pareil
+        dans un contrat.
+        """
+        return self.skin.normalized(self.float_value)
+
+    @property
     def url(self) -> str | None:
         """Lien direct vers l'annonce, quand elle est identifiee."""
         return f"https://csfloat.com/item/{self.listing_id}" if self.listing_id else None
@@ -162,7 +172,7 @@ def _extend_frontier(
         nxt: list[_State] = []
         for f_sum, c_sum, sel in current:
             for opt in pool:
-                nf = f_sum + opt.float_value
+                nf = f_sum + opt.normalized
                 if nf > float_budget + EPS:
                     continue
                 nxt.append((nf, c_sum + opt.unit_cost, sel + (opt,)))
@@ -173,7 +183,7 @@ def _extend_frontier(
 
 
 def _prune_dominated(options: Sequence[InputOption]) -> list[InputOption]:
-    ordered = sorted(options, key=lambda o: (o.float_value, o.unit_cost))
+    ordered = sorted(options, key=lambda o: (o.normalized, o.unit_cost))
     kept: list[InputOption] = []
     best_cost = float("inf")
     for opt in ordered:
@@ -227,7 +237,7 @@ def cheapest_unique_selection(
                 continue
             promoted: list[_State] = []
             for f_sum, c_sum, sel in frontier[k]:
-                nf = f_sum + opt.float_value
+                nf = f_sum + opt.normalized
                 if nf > float_budget + EPS:
                     continue
                 promoted.append((nf, c_sum + opt.unit_cost, sel + (opt,)))
@@ -373,7 +383,7 @@ def optimize_recipe(
             InputItem(skin=o.skin, float_value=o.float_value, unit_cost=o.unit_cost)
             for o in selection
         ]
-        achieved = sum(o.float_value for o in selection) / TRADEUP_INPUT_COUNT
+        achieved = sum(o.normalized for o in selection) / TRADEUP_INPUT_COUNT
         result = evaluate(
             items,
             outcomes_map,

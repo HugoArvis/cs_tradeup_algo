@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from .models import Skin, Wear
-from .wear import TRADEUP_INPUT_COUNT, average_float, output_float, wear_of
+from .wear import TRADEUP_INPUT_COUNT, average_normalized, output_float, wear_of
 
 
 class PriceLookup(Protocol):
@@ -76,7 +76,8 @@ class TradeUpResult:
     outcomes: tuple[Outcome, ...]
     inputs: tuple[InputItem, ...]  # ce qu'il faut acheter, concretement
     cost: float
-    avg_input_float: float
+    avg_input_float: float  # moyenne des floats AFFICHES, pour l'utilisateur
+    avg_normalized: float  # moyenne normalisee : c'est elle qui fait la sortie
     stattrak: bool
     unpriced_probability: float  # masse de proba sans prix connu
     # Marge avant la prochaine frontiere d'usure qui degraderait une sortie.
@@ -223,7 +224,10 @@ def evaluate(
     for item in inputs:
         counts[item.skin.collection_id] += 1
 
-    avg = average_float([item.float_value for item in inputs])
+    # Le float de sortie derive de la moyenne NORMALISEE, pas des floats
+    # affiches : chaque entree compte pour sa position dans son propre range.
+    avg = average_normalized([(item.skin, item.float_value) for item in inputs])
+    avg_affiche = sum(i.float_value for i in inputs) / len(inputs)
     cost = sum(item.unit_cost for item in inputs)
 
     probs = outcome_probabilities(dict(counts), outcomes_per_collection)
@@ -268,7 +272,8 @@ def evaluate(
         outcomes=tuple(built),
         inputs=tuple(inputs),
         cost=cost,
-        avg_input_float=avg,
+        avg_input_float=avg_affiche,
+        avg_normalized=avg,
         stattrak=stattrak,
         unpriced_probability=unpriced,
         cliff_distance=cliff_distance,
