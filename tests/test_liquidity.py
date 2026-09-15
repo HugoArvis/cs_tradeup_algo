@@ -117,3 +117,70 @@ def test_le_rapport_mentionne_le_goulot_et_lhorizon():
     assert "contrats/jour" in texte
     assert "goulot" in texte
     assert "40 contrats" in texte
+
+
+# --- Liquidite des ENTREES ---------------------------------------------------
+
+
+def test_le_volume_dachat_vient_du_marche_dachat():
+    """Confondre les deux marches faisait disparaitre toute contrainte d'achat.
+
+    Quand on achete sur Steam et revend sur CSFloat, qui ne publie aucun volume,
+    interroger le marche de revente pour une contrainte d'ACHAT renvoie None :
+    la contrainte s'evanouit en silence et le contrat parait executable sans
+    limite.
+    """
+    from tradeup.pricing.base import Quote
+    from tradeup.pricing.repository import MarketPricer
+
+    class Source:
+        def __init__(self, nom, volume):
+            self.name = nom
+            self._volume = volume
+
+        def fetch(self, name, *, use_cache=True):
+            return Quote(name, self.name, 1.0, 1.0, self._volume)
+
+    pricer = MarketPricer(Source("steam", 100), Source("csfloat", None))
+    assert pricer.buy_volume(ENTREE, Wear.FACTORY_NEW) == 100
+    assert pricer.volume(ENTREE, Wear.FACTORY_NEW) is None
+
+
+def test_une_entree_trop_peu_liquide_est_ecartee():
+    from tradeup.pricing.base import Quote
+    from tradeup.pricing.repository import MarketPricer
+
+    class Source:
+        name = "steam"
+
+        def fetch(self, name, *, use_cache=True):
+            return Quote(name, "steam", 1.0, 1.0, 2)  # 2 ventes par jour
+
+    pricer = MarketPricer(Source(), min_input_volume=5)
+    assert pricer.buy_cost(ENTREE, Wear.FACTORY_NEW) is None
+    assert pricer.illiquid_inputs() == [ENTREE.market_hash_name(Wear.FACTORY_NEW)]
+
+    # Sans le seuil, le meme objet reste achetable.
+    assert MarketPricer(Source()).buy_cost(ENTREE, Wear.FACTORY_NEW) is not None
+
+
+def test_le_rapport_alerte_quand_reunir_les_entrees_prend_des_jours():
+    # 10 exemplaires a trouver, 5 ventes par jour : meme en absorbant 20 % du
+    # flux, il faut dix jours.
+    capacite = execution_capacity(
+        make_result(),
+        Volumes({"entree (Factory New)": 5, "sortie (Factory New)": 10_000}),
+    )
+    assert capacite.sourcing_days is not None and capacite.sourcing_days > 1
+    assert capacite.sourcing_bottleneck.name == "entree (Factory New)"
+    texte = capacite.report()
+    assert "ENTREES DIFFICILES A REUNIR" in texte
+    assert "pas pour les dix" in texte
+
+
+def test_pas_dalerte_quand_les_entrees_abondent():
+    capacite = execution_capacity(
+        make_result(),
+        Volumes({"entree (Factory New)": 10_000, "sortie (Factory New)": 10_000}),
+    )
+    assert "ENTREES DIFFICILES" not in capacite.report()

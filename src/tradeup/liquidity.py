@@ -56,6 +56,31 @@ class CapacityReport:
             return None
         return n_contracts / self.contracts_per_day
 
+    @property
+    def input_constraints(self) -> tuple[Constraint, ...]:
+        """Contraintes venant des ENTREES, les plus serrees d'abord."""
+        return tuple(c for c in self.constraints if c.side == "achat")
+
+    @property
+    def sourcing_days(self) -> float | None:
+        """Jours pour reunir les entrees d'UN SEUL contrat.
+
+        Question distincte du rythme de repetition : avant de savoir combien de
+        fois on peut refaire le contrat, il faut savoir si on peut le faire une
+        fois. Dix exemplaires d'un skin qui s'en vend trois par jour, ce n'est
+        pas un contrat rentable, c'est une semaine d'achats a prix mouvant.
+        """
+        entrees = self.input_constraints
+        if not entrees:
+            return None
+        return max(1.0 / c.contracts_per_day for c in entrees)
+
+    @property
+    def sourcing_bottleneck(self) -> Constraint | None:
+        """L'entree la plus difficile a reunir."""
+        entrees = self.input_constraints
+        return min(entrees, key=lambda c: c.contracts_per_day) if entrees else None
+
     def report(self, n_contracts: int | None = None) -> str:
         if self.contracts_per_day is None:
             return (
@@ -71,6 +96,26 @@ class CapacityReport:
             lines.append(
                 f"  goulot : {b.name} -- {b.daily_volume} ventes/jour, "
                 f"{b.units_per_contract:.1f} unites par contrat ({b.side})"
+            )
+
+        # Avant "combien de fois", la question est "une seule fois, est-ce
+        # faisable ?". Un contrat dont les entrees demandent une semaine de
+        # collecte n'est pas executable au prix affiche aujourd'hui.
+        jours = self.sourcing_days
+        if jours is not None and jours > 1.0:
+            g = self.sourcing_bottleneck
+            lines.append(
+                f"  ENTREES DIFFICILES A REUNIR : ~{jours:.1f} jours pour un "
+                f"seul contrat"
+            )
+            if g is not None:
+                lines.append(
+                    f"    le plus rare : {g.name} -- {g.units_per_contract:.0f} "
+                    f"exemplaires a trouver, {g.daily_volume} ventes/jour"
+                )
+            lines.append(
+                "    le prix affiche vaut pour la premiere unite, pas pour les "
+                "dix."
             )
         if n_contracts is not None:
             days = self.days_for(n_contracts)
@@ -107,9 +152,15 @@ def execution_capacity(
     for item in result.inputs:
         grouped[(item.skin, item.wear)] += 1
 
+    # Le flux qui limite l'APPROVISIONNEMENT est celui du marche ou l'on achete,
+    # pas celui ou l'on revend. Une source qui sait les distinguer le dit.
+    volume_achat = getattr(prices, "buy_volume", None)
+    if not callable(volume_achat):
+        volume_achat = prices.volume
+
     for (skin, wear), qty in grouped.items():
         name = skin.market_hash_name(wear, result.stattrak)
-        vol = prices.volume(skin, wear, result.stattrak)
+        vol = volume_achat(skin, wear, result.stattrak)
         if not vol:
             unknown.append(name)
             continue

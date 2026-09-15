@@ -26,6 +26,11 @@ class MarketPricer:
         safety_margin: decote appliquee a la valeur de revente esperee. Les prix
             bougent, le carnet se vide : 0.05 signifie "je ne compte que sur
             95 % du prix affiche".
+        min_volume: volume 24 h minimal pour compter une SORTIE.
+        min_input_volume: volume 24 h minimal pour retenir une ENTREE. Un skin
+            qui ne se vend jamais n'a pas de prix reel a l'achat non plus, et
+            surtout il faut en reunir DIX : le prix affiche sur une annonce
+            unique ne dit rien du cout des neuf suivantes.
         stattrak_supported: si False, toute demande StatTrak renvoie None.
     """
 
@@ -38,6 +43,7 @@ class MarketPricer:
         sell_fees: FeeModel | str = "steam",
         safety_margin: float = 0.05,
         min_volume: int | None = None,
+        min_input_volume: int | None = None,
         conservative_sell: bool = True,
     ):
         self.buy_source = buy_source
@@ -46,9 +52,11 @@ class MarketPricer:
         self.sell_fees = _as_fee_model(sell_fees)
         self.safety_margin = safety_margin
         self.min_volume = min_volume
+        self.min_input_volume = min_input_volume
         self.conservative_sell = conservative_sell
         self._quotes: dict[tuple[str, str], Quote | None] = {}
         self._volume_unknown: set[str] = set()
+        self._illiquid_inputs: set[str] = set()
 
     # --- Protocole PriceLookup ---
 
@@ -75,11 +83,38 @@ class MarketPricer:
         if q is None:
             return None
         listed = q.buy_reference()
-        return self.buy_fees.cost_to_buy(listed) if listed is not None else None
+        if listed is None:
+            return None
+        if self.min_input_volume is not None and q.volume is not None:
+            if q.volume < self.min_input_volume:
+                # Un contrat exige DIX exemplaires du meme objet. Sur un skin
+                # qui s'en vend deux par jour, le prix de la premiere annonce
+                # ne dit rien du cout des neuf autres -- et les reunir prendrait
+                # des jours, pendant lesquels les prix bougent.
+                self._illiquid_inputs.add(q.market_hash_name)
+                return None
+        return self.buy_fees.cost_to_buy(listed)
 
     def volume(self, skin: Skin, wear: Wear, stattrak: bool = False) -> int | None:
+        """Volume du marche de REVENTE : c'est la qu'on ecoulera la sortie."""
         q = self._quote(self.sell_source, skin, wear, stattrak)
         return q.volume if q else None
+
+    def buy_volume(self, skin: Skin, wear: Wear, stattrak: bool = False) -> int | None:
+        """Volume du marche d'ACHAT.
+
+        Distinct de `volume` : quand achat et revente sont sur deux marches, le
+        flux qui limite l'approvisionnement n'est pas celui qui limite
+        l'ecoulement. Les confondre faisait disparaitre en silence toute
+        contrainte d'achat des que la revente passait sur CSFloat, qui ne
+        publie aucun volume.
+        """
+        q = self._quote(self.buy_source, skin, wear, stattrak)
+        return q.volume if q else None
+
+    def illiquid_inputs(self) -> list[str]:
+        """Entrees ecartees faute de volume suffisant."""
+        return sorted(self._illiquid_inputs)
 
     # --- Prechargement ---
 

@@ -135,6 +135,7 @@ def _make_pricer(args) -> tuple[MarketPricer, QuoteCache]:
         sell_fees=sell_fees,
         safety_margin=args.margin,
         min_volume=args.min_volume,
+        min_input_volume=getattr(args, "min_input_volume", None),
     )
     return pricer, cache
 
@@ -493,6 +494,20 @@ def cmd_scan(args) -> int:
     )
 
     print(f"\nScan : {stats}\n", file=sys.stderr)
+
+    # Sans ca, un filtre de liquidite d'entree trop severe ressemble a une
+    # absence d'opportunite : l'utilisateur doit savoir ce qui a ete ecarte.
+    illiquides = pricer.illiquid_inputs()
+    if illiquides:
+        print(
+            f"{len(illiquides)} entrees ecartees faute de volume "
+            f"(< {args.min_input_volume} ventes/jour) : "
+            + ", ".join(illiquides[:3])
+            + ("..." if len(illiquides) > 3 else "")
+            + "\nBaisse --min-input-volume pour les reprendre.",
+            file=sys.stderr,
+        )
+
     if not candidates:
         if stats["evaluees"] == 0:
             print("Aucun contrat n'a pu etre EVALUE : il manque les prix. "
@@ -711,6 +726,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--min-volume", type=int, default=5,
                    help="volume 24 h minimal pour compter une sortie "
                         "(0 pour desactiver ; un objet sans vente n'a pas de prix reel)")
+    s.add_argument("--min-input-volume", type=int, default=3,
+                   help="volume 24 h minimal pour retenir une ENTREE : il en "
+                        "faut dix, le prix d'une annonce unique ne dit rien du "
+                        "cout des neuf suivantes (0 pour desactiver)")
     # Modelisation
     s.add_argument("--margin", type=float, default=0.05,
                    help="decote de securite sur la revente (defaut 5 %%)")

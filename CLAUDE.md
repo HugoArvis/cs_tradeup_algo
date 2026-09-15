@@ -103,6 +103,18 @@ les expose pour dire combien de temps une revente prendra.
 **`all_outcomes_profitable` prime sur le nombre de sorties** — trois issues
 toutes rentables valent mieux qu'une issue unique au gain marginal.
 
+**Un contrat exige dix exemplaires du même objet.** Le prix affiché vaut pour la
+première annonce, pas pour les neuf suivantes. `--min-input-volume` (défaut 3)
+écarte les entrées trop peu vendues — miroir de `--min-volume` côté sortie — et
+`CapacityReport.sourcing_days` alerte quand réunir les entrées d'**un seul**
+contrat prend plus d'une journée. Question distincte du rythme de répétition :
+avant de savoir combien de fois refaire le contrat, il faut savoir si on peut le
+faire une fois.
+
+`volume()` cote le marché de **revente**, `buy_volume()` celui d'**achat**. Les
+confondre faisait disparaître en silence toute contrainte d'approvisionnement
+dès que la revente passait sur CSFloat, qui ne publie aucun volume.
+
 **Le float d'entrée est un tirage, pas une valeur choisie.** Sur Steam on achète
 un palier, pas un float. `--float-model random` (module `floatrisk`) chiffre ce
 risque au lieu de l'éviter par la marge forfaitaire `--float-safety` : float
