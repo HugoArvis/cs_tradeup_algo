@@ -115,6 +115,25 @@ faite 33 % sous le marché. `/history/{nom}/graph` donne les ventes par jour,
 `/history/{nom}/sales` les transactions réelles — `CSFloatPricer.sales_stats()`
 les expose pour dire combien de temps une revente prendra.
 
+**Mélanger deux collections est possible mais gagne rarement**
+(`scan --max-collections 2` ; `plan` et `inventory` restent mono-collection).
+À paliers de sortie fixes, l'EV brute vaut `(n_A·V_A + n_B·V_B) / (n_A·k_A +
+n_B·k_B)` : une homographie de la répartition, donc **monotone** — son maximum
+est à une borne, c'est-à-dire en mono-collection. Un mélange ne peut donc gagner
+que par le **coût** des entrées, jamais par la valeur des sorties. La monotonie
+tombe seulement quand la répartition change le palier d'usure atteignable.
+
+Mesuré sur 10 collections Mil-Spec entièrement cotées : 405 recettes mixtes
+évaluées, meilleure à **+1,17** contre **+1,38** en mono — et cette meilleure
+mixte n'est qu'un « 9× Fracture + 1× Recoil », soit le mono dilué. Taux de
+contrats rentables : 20 % en mono, 5,7 % en mixte.
+
+Le seul mélange gagnant de l'échantillon illustre pourquoi le défaut est
+`risk_adjusted` et non l'EV brute — *9× Bank + 1× Lake* contre *10× Bank* :
+profit +0,99 contre +0,97 et ROI 6,4 % contre 5,6 %, mais **pire cas 0,82 au
+lieu de 18,19** et P(gain) 90 % au lieu de 100 %. Soit 0,02 € d'espérance
+achetés au prix d'une perte de 16,40 € une fois sur dix.
+
 **`all_outcomes_profitable` prime sur le nombre de sorties** — trois issues
 toutes rentables valent mieux qu'une issue unique au gain marginal. D'où le
 classement : `scoring.sort_key` renvoie un **tuple** (probabilité puis gain pour

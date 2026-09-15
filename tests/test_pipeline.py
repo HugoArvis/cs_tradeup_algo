@@ -251,3 +251,81 @@ def test_ranking_safety_prefere_la_probabilite_de_gain(db, prices):
     assert len(par_ev) == len(par_surete) == 2
     assert "Rentable" in par_ev[0].label
     assert "Rentable" in par_surete[0].label
+
+
+# --- Contrats inter-collections ----------------------------------------------
+
+
+def test_les_recettes_melangent_bien_deux_collections():
+    """Le jeu autorise des entrees de collections differentes.
+
+    La fonctionnalite existe mais n'etait couverte par aucun test : elle
+    pouvait disparaitre sans que rien ne le signale.
+    """
+    db = SkinDatabase.from_dict(RAW_DB)
+    recettes = list(iter_recipes(db, Rarity.MIL_SPEC, max_collections=2))
+    duos = [r for r in recettes if len(r.counts) == 2]
+
+    assert duos, "aucune recette bi-collection generee"
+    # 9 repartitions par paire (1/9 a 9/1), et chacune doit faire 10 entrees.
+    assert all(r.total == 10 for r in duos)
+    assert {tuple(sorted(n for _, n in r.counts)) for r in duos} == {
+        (1, 9), (2, 8), (3, 7), (4, 6), (5, 5)
+    }
+
+
+def test_un_melange_setale_sur_les_sorties_des_deux_collections():
+    """Melanger AUGMENTE le nombre d'issues, donc la variance.
+
+    C'est le cout cache du melange : la masse de probabilite se repartit sur
+    les sorties des deux collections au lieu d'une seule.
+    """
+    db = SkinDatabase.from_dict(RAW_DB)
+    prix = {
+        n: 1.0 for n in required_market_names(
+            db, list(db), Rarity.MIL_SPEC
+        )
+    }
+    pricer = StaticPricer(prix)
+
+    mono = next(r for r in iter_recipes(db, Rarity.MIL_SPEC, max_collections=1))
+    duo = next(r for r in iter_recipes(db, Rarity.MIL_SPEC, max_collections=2)
+               if len(r.counts) == 2)
+
+    res_mono = optimize_recipe(mono, db, pricer)
+    res_duo = optimize_recipe(duo, db, pricer)
+    assert res_mono is not None and res_duo is not None
+
+    assert res_duo.distinct_outcomes > res_mono.distinct_outcomes
+    # La masse reste une probabilite, repartie sur davantage d'issues.
+    assert sum(o.probability for o in res_duo.outcomes) == pytest.approx(1.0)
+
+
+def test_la_dilution_suit_la_formule_de_probabilite():
+    """P(s de C) = n_C / somme(n_C' x k_C').
+
+    Collection Rentable a DEUX sorties, Collection Perdante une seule. Avec
+    9 entrees rentables et 1 perdante : denominateur = 9x2 + 1x1 = 19. Chaque
+    sortie rentable pese 9/19 et l'intruse 1/19.
+
+    Le resultat contre-intuitif est la : une seule entree etrangere ne prend
+    pas 10 % de la masse mais 5 %, parce que la collection d'en face a moins de
+    sorties. La dilution depend du NOMBRE de sorties, pas que des entrees.
+    """
+    from tradeup.ev import outcome_probabilities
+
+    db = SkinDatabase.from_dict(RAW_DB)
+    rentables = db.collection("col_rentable").outcomes_for_input_rarity(
+        Rarity.MIL_SPEC)
+    perdantes = db.collection("col_perdante").outcomes_for_input_rarity(
+        Rarity.MIL_SPEC)
+    assert len(rentables) == 2 and len(perdantes) == 1
+
+    probas = outcome_probabilities(
+        {"col_rentable": 9, "col_perdante": 1},
+        {"col_rentable": rentables, "col_perdante": perdantes},
+    )
+    assert sum(probas.values()) == pytest.approx(1.0)
+    for s in rentables:
+        assert probas[s.key] == pytest.approx(9 / 19)
+    assert probas[perdantes[0].key] == pytest.approx(1 / 19)

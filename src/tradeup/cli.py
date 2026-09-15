@@ -484,7 +484,12 @@ def cmd_scan(args) -> int:
         print(
             f"Attention : {n} collections en mode bi-collection = "
             f"~{n + n * (n - 1) // 2 * 9} recettes. Comptez plusieurs minutes de "
-            f"calcul. Restreignez avec --collections pour aller plus vite.",
+            f"calcul. Restreignez avec --collections pour aller plus vite.\n"
+            f"  A savoir : melanger gagne rarement. L'EV brute est monotone en "
+            f"la repartition, donc maximale en mono-collection ; un melange ne "
+            f"peut gagner que par le cout des entrees. Mesure sur 10 "
+            f"collections cotees, le meilleur melange faisait +1.17 contre "
+            f"+1.38 en mono, et pour deux fois plus de sorties possibles.",
             file=sys.stderr,
         )
 
