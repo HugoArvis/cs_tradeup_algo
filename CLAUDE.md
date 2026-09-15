@@ -95,6 +95,15 @@ Wear là où le calcul annonçait Factory New.
 
 **Exclure les objets stickés de la valorisation** — une sortie de contrat naît
 nue. Les compter valorisait une Five-SeveN Candy Apple 582 USD contre 85 réels.
+La règle vaut pour les **deux** sources CSFloat (`plan.CSFloatPricer` et
+`pricing.csfloat`), et impose d'examiner 50 annonces, pas 10 : sur l'AK-47
+Redline (FT), les dix moins chères sont toutes stickées — 3 nues sur 50. La
+fenêtre est un paramètre de requête, elle ne coûte aucun quota.
+
+**CSFloat ne donne le volume que sur demande** (`--csfloat-volume`), via un
+appel `/history/{nom}/graph` qui **double** la consommation de quota. Sans lui,
+`--min-volume` ne filtre rien et la capacité d'exécution reste « inconnue » —
+silencieusement.
 
 **Aucune prime de bas float dans le calcul** — elle existe (+40 %) mais ce sont
 des prix demandés, rien ne dit qu'ils se concluent. Retenir la moins chère

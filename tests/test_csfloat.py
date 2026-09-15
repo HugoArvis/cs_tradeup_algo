@@ -204,3 +204,98 @@ def test_mode_hors_ligne_ne_touche_pas_au_reseau(tmp_path):
 def test_hors_ligne_sans_cache_refuse():
     with pytest.raises(ValueError):
         CSFloat("cle", offline=True)
+
+
+# --- Cotation de revente : annonces nues et volume ----------------------------
+
+
+def row_stickee(listing_id, price_cents, **kw):
+    r = make_row(listing_id, price_cents, **kw)
+    r["item"]["stickers"] = [{"name": "Katowice 2014"}]
+    return r
+
+
+def test_la_cotation_ignore_les_annonces_stickees():
+    """Une sortie de contrat nait NUE.
+
+    Valoriser un exemplaire stické revient a valoriser les stickers : c'est ce
+    qui a estime une Five-SeveN Candy Apple 582 USD contre 85 reels.
+    """
+    src, _ = make_source({"data": [
+        row_stickee("st", 100),   # la moins chere, mais stickee
+        make_row("nue1", 500),
+        make_row("nue2", 700),
+    ]})
+    q = src.fetch("AK-47 | Redline (FT)", use_cache=False)
+    assert q is not None
+    assert q.lowest_price == 5.0  # pas 1.0
+    assert q.median_price == 7.0
+
+
+def test_aucune_annonce_nue_donne_aucune_cotation():
+    # Mieux vaut ne pas coter que coter autre chose que ce qu'on obtiendra.
+    src, _ = make_source({"data": [row_stickee("a", 100), row_stickee("b", 200)]})
+    assert src.fetch("AK-47 | Redline (FT)", use_cache=False) is None
+
+
+def test_la_fenetre_de_cotation_est_large():
+    """Mesure sur l'API reelle : les 10 annonces les moins cheres d'une AK-47
+    Redline (Field-Tested) etaient TOUTES stickees -- 3 nues seulement sur 50.
+    Une fenetre etroite ne trouve donc rien a coter sur les skins populaires.
+    """
+    from tradeup.pricing.csfloat import LISTINGS_WINDOW
+
+    src, client = make_source({"data": [make_row("a", 100)]})
+    src.fetch("AK-47 | Redline (FT)", use_cache=False)
+    assert client.calls[0][1]["limit"] == LISTINGS_WINDOW
+    assert LISTINGS_WINDOW >= 50
+
+
+def test_le_volume_nest_pas_recupere_par_defaut():
+    # L'endpoint history double la consommation de quota : il faut le demander.
+    src, client = make_source({"data": [make_row("a", 100)]})
+    q = src.fetch("AK-47 | Redline (FT)", use_cache=False)
+    assert q.volume is None
+    assert all("history" not in url for url, _ in client.calls)
+
+
+def test_le_volume_est_recupere_sur_demande():
+    class DeuxEndpoints:
+        def __init__(self):
+            self.calls = []
+
+        def get_json(self, url, params=None):
+            self.calls.append((url, dict(params or {})))
+            if "history" in url:
+                return [{"day": "2026-09-0%d" % (i + 1), "count": 10 + i,
+                         "avg_price": 1000} for i in range(7)]
+            return {"data": [make_row("a", 100)]}
+
+    client = DeuxEndpoints()
+    src = CSFloat("cle", client=client, with_volume=True)
+    q = src.fetch("AK-47 | Redline (FT)", use_cache=False)
+    assert q.volume == 13  # moyenne de 10..16
+    assert any("history" in url for url, _ in client.calls)
+
+
+def test_une_cotation_cachee_sans_volume_ne_satisfait_pas_une_demande_avec(tmp_path):
+    """Sinon l'objet parait illiquide alors qu'on n'a jamais pose la question."""
+    from tradeup.pricing.base import Quote
+    from tradeup.pricing.cache import QuoteCache
+
+    cache = QuoteCache(path=tmp_path / "c.db")
+    cache.put(Quote("X", "csfloat", 5.0, 5.0, None, currency="USD"))
+
+    sans = CSFloat("cle", client=FakeHttpClient({"data": []}), cache=cache)
+    assert sans.fetch("X") is not None  # le cache suffit
+
+    class Client:
+        def get_json(self, url, params=None):
+            if "history" in url:
+                return [{"day": "2026-09-01", "count": 8, "avg_price": 100}]
+            return {"data": [make_row("a", 500, name="X")]}
+
+    avec = CSFloat("cle", client=Client(), cache=cache, with_volume=True)
+    q = avec.fetch("X")
+    assert q is not None and q.volume == 8
+    cache.close()

@@ -29,6 +29,11 @@ log = logging.getLogger(__name__)
 API_ROOT = "https://csfloat.com/api/v1"
 LISTINGS_URL = f"{API_ROOT}/listings"
 
+#: Annonces examinees pour coter un objet. Le maximum accepte par l'API, et il
+#: en faut beaucoup : sur un skin populaire les moins cheres sont stickees, donc
+#: inutilisables pour valoriser une sortie de contrat, qui nait nue.
+LISTINGS_WINDOW = 50
+
 
 @dataclass(frozen=True, slots=True)
 class Listing:
@@ -98,6 +103,7 @@ class CSFloat(PriceSource):
         client: HttpClient | None = None,
         ttl_seconds: float = 3 * 3600,
         offline: bool = False,
+        with_volume: bool = False,
     ):
         if not api_key:
             raise ValueError("Cle API CSFloat requise")
@@ -107,6 +113,7 @@ class CSFloat(PriceSource):
         self.cache = cache
         self.ttl = ttl_seconds
         self.offline = offline
+        self.with_volume = with_volume
         self.client = client or HttpClient(
             rate_limiter=RateLimiter(max_calls=calls_per_minute, period=60.0),
             headers={"Authorization": api_key},
@@ -120,27 +127,62 @@ class CSFloat(PriceSource):
             cached = self.cache.get(
                 market_hash_name, self.name, ttl=ttl, currency=self.currency
             )
-            if cached is not None:
+            # Une cotation mise en cache SANS volume ne repond pas a une demande
+            # AVEC volume : la resservir ferait croire l'objet illiquide alors
+            # qu'on n'a simplement jamais pose la question.
+            if cached is not None and not (self.with_volume and cached.volume is None):
                 return cached
         if self.offline:
             return None
 
-        listings = self.listings(market_hash_name, limit=10)
-        if not listings:
+        # Fenetre large a dessein. Une sortie de contrat nait NUE, et sur un skin
+        # populaire les annonces les moins cheres sont presque toutes stickees :
+        # mesure sur l'AK-47 Redline (Field-Tested), les DIX premieres l'etaient.
+        # Chercher parmi 10 ne trouvait donc rien a coter. La fenetre est un
+        # parametre de requete, pas un appel de plus : elle ne coute aucun quota.
+        listings = self.listings(market_hash_name, limit=LISTINGS_WINDOW)
+        # Un exemplaire stické se compare aux stickers autant qu'a l'arme :
+        # c'est ce qui a valorise une Five-SeveN Candy Apple 582 USD contre 85
+        # reels. `plan` filtrait deja ; cette source, utilisee par
+        # `scan --sell-market csfloat`, ne le faisait pas.
+        nues = [l for l in listings if l.plain]
+        if not nues:
+            # Tout est stické jusqu'ici : mieux vaut ne pas coter que coter
+            # autre chose que ce qu'on obtiendra.
+            log.info(
+                "%s : aucune annonce nue parmi %d -- pas de cotation",
+                market_hash_name, len(listings),
+            )
             return None
 
-        prices = sorted(l.price for l in listings)
+        prices = sorted(l.price for l in nues)
         quote = Quote(
             market_hash_name=market_hash_name,
             source=self.name,
             lowest_price=prices[0],
             median_price=prices[len(prices) // 2],
-            volume=None,  # l'endpoint listings ne donne pas de volume de ventes
+            volume=self._daily_volume(market_hash_name) if self.with_volume else None,
             currency=self.currency,
         )
         if self.cache:
             self.cache.put(quote)
         return quote
+
+    def _daily_volume(self, market_hash_name: str) -> int | None:
+        """Ventes par jour, moyennees sur une semaine.
+
+        L'endpoint `listings` ne dit rien de la liquidite : sans cet appel
+        supplementaire, `--min-volume` ne filtre rien sur CSFloat et la capacite
+        d'execution reste "INCONNUE". Mais il DOUBLE la consommation de quota,
+        d'ou l'option plutot que le comportement par defaut.
+        """
+        try:
+            jours = self.daily_sales(market_hash_name, jours=7)
+        except Exception:  # noqa: BLE001 - la liquidite est un complement
+            return None
+        if not jours:
+            return None
+        return round(sum(j["ventes"] for j in jours) / len(jours))
 
     def listings(
         self,

@@ -97,6 +97,7 @@ def _make_pricer(args) -> tuple[MarketPricer, QuoteCache]:
             cache=cache,
             calls_per_minute=getattr(args, "csfloat_rate", 10),
             offline=getattr(args, "offline", False),
+            with_volume=getattr(args, "csfloat_volume", False),
         )
         partage.append(source)
         return source
@@ -765,6 +766,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--sell-market", default="steam", choices=("steam", "csfloat"),
                    help="marche de REVENTE : csfloat prend ses vrais prix "
                         "(utiliser avec --currency USD)")
+    s.add_argument("--csfloat-volume", action="store_true",
+                   help="recuperer aussi le volume de ventes CSFloat, sans quoi "
+                        "--min-volume ne filtre rien et la capacite d'execution "
+                        "reste inconnue (DOUBLE la consommation de quota)")
     s.add_argument("--csfloat-rate", type=int, default=10,
                    help="requetes CSFloat par minute (quota sur fenetre longue : "
                         "ne pas monter sans raison)")
