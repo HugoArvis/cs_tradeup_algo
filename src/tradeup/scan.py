@@ -23,22 +23,27 @@ log = logging.getLogger(__name__)
 
 
 def required_market_names(
-    db: SkinDatabase, collections: Iterable[Collection], rarity: Rarity
+    db: SkinDatabase,
+    collections: Iterable[Collection],
+    rarity: Rarity,
+    stattrak: bool = False,
 ) -> list[str]:
     """Tous les `market_hash_name` necessaires pour evaluer ces collections.
 
     Entrees a `rarity` et sorties a la rarete superieure, dans chaque usure
     reellement atteignable par le range du skin.
+
+    En StatTrak, ce sont d'AUTRES objets de marche : "StatTrak(tm) AK-47 |
+    Redline (Field-Tested)" a son propre prix et son propre volume. Precharger
+    les noms normaux ne servirait a rien.
     """
-    target = rarity.next_up
     names: set[str] = set()
     for c in collections:
-        skins = list(c.by_rarity(rarity))
-        if target is not None:
-            skins += list(c.by_rarity(target))
+        skins = list(c.inputs_for_rarity(rarity, stattrak))
+        skins += list(c.outcomes_for_input_rarity(rarity, stattrak))
         for skin in skins:
             for wear in skin.available_wears():
-                names.add(skin.market_hash_name(wear))
+                names.add(skin.market_hash_name(wear, stattrak))
     return sorted(names)
 
 
@@ -76,6 +81,7 @@ def scan(
     float_percentile: float = 0.15,
     float_safety: float = 0.02,
     float_model: str = "fixed",
+    stattrak: bool = False,
     max_unit_cost: float | None = None,
     limit: int | None = 20,
     progress: Callable[[int, int], None] | None = None,
@@ -92,6 +98,7 @@ def scan(
             rarity,
             max_collections=max_collections,
             collection_filter=collection_filter,
+            stattrak=stattrak,
         )
     )
     log.info("%d recettes a evaluer a la rarete %s", len(recipes), rarity.label)
@@ -109,6 +116,7 @@ def scan(
             float_percentile=float_percentile,
             float_safety=float_safety,
             float_model=float_model,
+            stattrak=stattrak,
             max_unit_cost=max_unit_cost,
         )
         if result is None:

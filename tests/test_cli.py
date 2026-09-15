@@ -181,3 +181,17 @@ def test_verify_sans_cible_refuse(capsys):
 def test_verify_collection_introuvable(capsys):
     assert cli.main(["verify", "--collection", "Collection Imaginaire"]) == 1
     assert "introuvable" in capsys.readouterr().err.lower()
+
+
+def test_stattrak_est_declare_sur_les_commandes_utiles():
+    assert parse("scan").stattrak is False
+    assert parse("scan", "--stattrak").stattrak is True
+    assert parse("collections", "--stattrak").stattrak is True
+    assert parse("inspect", "X", "--stattrak").stattrak is True
+
+
+def test_inspect_refuse_une_collection_sans_stattrak(capsys):
+    code = cli.main(["inspect", "The Bank Collection", "--rarity", "industrial",
+                     "--stattrak"])
+    assert code == 1
+    assert "StatTrak" in capsys.readouterr().err

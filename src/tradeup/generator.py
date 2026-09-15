@@ -104,6 +104,7 @@ def build_options(
     *,
     float_percentile: float = 0.15,
     max_unit_cost: float | None = None,
+    stattrak: bool = False,
 ) -> list[InputOption]:
     """Objets d'entree achetables dans cette collection, a cette rarete.
 
@@ -111,11 +112,14 @@ def build_options(
     dans un palier d'usure : 0.15 = "je trouve des objets a 15 % du bas du
     palier". Sur CSFloat avec filtrage par float c'est realiste ; sur Steam,
     ou l'on ne choisit pas le float, il faut monter vers 0.5.
+
+    Un contrat StatTrak n'accepte que des entrees StatTrak -- le jeu refuse le
+    melange. Les skins sans variante StatTrak sont donc exclus.
     """
     options: list[InputOption] = []
-    for skin in collection.by_rarity(rarity):
+    for skin in collection.inputs_for_rarity(rarity, stattrak):
         for wear in skin.available_wears():
-            cost = prices.buy_cost(skin, wear, False)
+            cost = prices.buy_cost(skin, wear, stattrak)
             if cost is None or cost <= 0:
                 continue
             if max_unit_cost is not None and cost > max_unit_cost:
@@ -295,6 +299,7 @@ def iter_recipes(
     max_collections: int = 2,
     collection_filter: Iterable[str] | None = None,
     min_share: int = 1,
+    stattrak: bool = False,
 ) -> Iterator[Recipe]:
     """Enumere les repartitions de 10 entrees entre collections.
 
@@ -302,7 +307,7 @@ def iter_recipes(
     moins variables, et ceux ou l'on controle le mieux la sortie. Les melanges
     a 2 collections servent a diluer vers une collection a forte valeur.
     """
-    pool = db.tradeable_collections(rarity)
+    pool = db.tradeable_collections(rarity, stattrak)
     if collection_filter is not None:
         wanted = set(collection_filter)
         pool = [c for c in pool if c.id in wanted or c.name in wanted]
@@ -368,7 +373,7 @@ def optimize_recipe(
         float_safety = 0.0
 
     collections = [db.collection(cid) for cid, _ in recipe.counts]
-    outcomes_map = db.outcomes_map(collections, recipe.rarity)
+    outcomes_map = db.outcomes_map(collections, recipe.rarity, stattrak)
     all_outcomes = [s for skins in outcomes_map.values() for s in skins]
     if not all_outcomes:
         return None
@@ -380,6 +385,7 @@ def optimize_recipe(
             prices,
             float_percentile=float_percentile,
             max_unit_cost=max_unit_cost,
+            stattrak=stattrak,
         )
         for c in collections
     }

@@ -103,21 +103,32 @@ class SkinDatabase:
 
     # --- Requetes utiles au scan ---
 
-    def tradeable_collections(self, input_rarity: Rarity) -> list[Collection]:
+    def tradeable_collections(
+        self, input_rarity: Rarity, stattrak: bool = False
+    ) -> list[Collection]:
         """Collections utilisables en entree ET ayant des sorties a la rarete cible.
 
         Une collection sans sortie a la rarete superieure ne produit rien : ses
         entrees seraient du cout pur. On les ecarte d'office.
+
+        En StatTrak, il faut des entrees ET des sorties qui en possedent une
+        variante : la moitie des collections tombe, et aucune en dessous du
+        Mil-Spec -- les caisses ne produisent pas de StatTrak a ces raretes.
         """
         return [
             c
             for c in self.collections.values()
-            if c.by_rarity(input_rarity) and c.outcomes_for_input_rarity(input_rarity)
+            if c.inputs_for_rarity(input_rarity, stattrak)
+            and c.outcomes_for_input_rarity(input_rarity, stattrak)
         ]
 
     def outcomes_map(
-        self, collections: Iterable[Collection], input_rarity: Rarity
+        self,
+        collections: Iterable[Collection],
+        input_rarity: Rarity,
+        stattrak: bool = False,
     ) -> dict[str, tuple[Skin, ...]]:
         return {
-            c.id: c.outcomes_for_input_rarity(input_rarity) for c in collections
+            c.id: c.outcomes_for_input_rarity(input_rarity, stattrak)
+            for c in collections
         }

@@ -175,8 +175,12 @@ def cmd_inspect(args) -> int:
         return 1
 
     rarity = RARITY_ALIASES[args.rarity]
-    inputs = col.by_rarity(rarity)
-    outputs = col.outcomes_for_input_rarity(rarity)
+    inputs = col.inputs_for_rarity(rarity, args.stattrak)
+    outputs = col.outcomes_for_input_rarity(rarity, args.stattrak)
+    if args.stattrak and not (inputs and outputs):
+        print("Aucun contrat StatTrak possible dans cette collection a cette "
+              "rarete.", file=sys.stderr)
+        return 1
 
     print(f"{col.name}  [{col.id}]")
     print(f"\nEntrees ({rarity.label}) : {len(inputs)}")
@@ -202,15 +206,16 @@ def cmd_collections(args) -> int:
     """
     db = SkinDatabase.load(args.db)
     rarity = RARITY_ALIASES[args.rarity]
-    cols = db.tradeable_collections(rarity)
+    cols = db.tradeable_collections(rarity, args.stattrak)
 
     rows = []
     for c in cols:
-        outs = c.outcomes_for_input_rarity(rarity)
+        outs = c.outcomes_for_input_rarity(rarity, args.stattrak)
         if args.max_outcomes is not None and len(outs) > args.max_outcomes:
             continue
         fn_possible = sum(1 for s in outs if s.min_float < Wear.FACTORY_NEW.hi)
-        rows.append((len(outs), c, len(c.by_rarity(rarity)), fn_possible))
+        rows.append((len(outs), c,
+                     len(c.inputs_for_rarity(rarity, args.stattrak)), fn_possible))
 
     rows.sort(key=lambda r: (r[0], r[1].name))
 
@@ -387,7 +392,7 @@ def cmd_scan(args) -> int:
     rarity = RARITY_ALIASES[args.rarity]
     pricer, cache = _make_pricer(args)
 
-    collections = db.tradeable_collections(rarity)
+    collections = db.tradeable_collections(rarity, args.stattrak)
     if args.collections:
         wanted = [db.find_collection(c) for c in args.collections]
         missing = [c for c, f in zip(args.collections, wanted) if f is None]
@@ -396,7 +401,7 @@ def cmd_scan(args) -> int:
             return 1
         collections = [c for c in wanted if c is not None]
 
-    names = required_market_names(db, collections, rarity)
+    names = required_market_names(db, collections, rarity, args.stattrak)
     # `warm()` precharge sur CHAQUE marche distinct : compter le seul marche
     # d'achat sous-estimait l'attente de moitie des que la revente differait.
     sources = list(dict.fromkeys([pricer.buy_source, pricer.sell_source]))
@@ -488,6 +493,7 @@ def cmd_scan(args) -> int:
         float_percentile=args.float_pct,
         float_safety=args.float_safety,
         float_model=args.float_model,
+        stattrak=args.stattrak,
         max_unit_cost=args.max_unit_cost,
         limit=args.limit,
         progress=_progress("recettes"),
@@ -686,6 +692,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("inspect", help="detail d'une collection")
     s.add_argument("collection")
     s.add_argument("--rarity", default="mil-spec", choices=sorted(RARITY_ALIASES))
+    s.add_argument("--stattrak", action="store_true")
     s.set_defaults(func=cmd_inspect)
 
     s = sub.add_parser("collections",
@@ -693,6 +700,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--rarity", default="mil-spec", choices=sorted(RARITY_ALIASES))
     s.add_argument("--max-outcomes", type=int, default=None,
                    help="ne garder que les collections a au plus N sorties")
+    s.add_argument("--stattrak", action="store_true",
+                   help="ne lister que les collections utilisables en StatTrak")
     s.set_defaults(func=cmd_collections)
 
     s = sub.add_parser("price", help="cotation Steam d'un objet")
@@ -735,6 +744,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="decote de securite sur la revente (defaut 5 %%)")
     s.add_argument("--float-pct", type=float, default=0.15,
                    help="position du float sourcable dans son palier")
+    s.add_argument("--stattrak", action="store_true",
+                   help="contrat StatTrak : entrees ET sorties StatTrak "
+                        "uniquement (aucune collection sous le Mil-Spec)")
     s.add_argument("--float-model", default="fixed", choices=("fixed", "random"),
                    help="random : le float d'entree est un TIRAGE, son risque "
                         "est chiffre dans l'EV au lieu d'etre evite par une "

@@ -103,6 +103,13 @@ les expose pour dire combien de temps une revente prendra.
 **`all_outcomes_profitable` prime sur le nombre de sorties** — trois issues
 toutes rentables valent mieux qu'une issue unique au gain marginal.
 
+**Un contrat StatTrak ne mélange rien** : entrées StatTrak, sorties StatTrak, et
+`StatTrak™ AK-47 | Redline (FT)` est un **autre objet de marché** avec son prix
+et son volume. `--stattrak` filtre entrées et sorties (`inputs_for_rarity`,
+`outcomes_for_input_rarity`) — retirer des sorties **redistribue** la masse de
+probabilité, ce n'est pas les mettre à zéro. Aucune collection sous le Mil-Spec
+n'en a ; 44 sur 88 en Mil-Spec.
+
 **Un contrat exige dix exemplaires du même objet.** Le prix affiché vaut pour la
 première annonce, pas pour les neuf suivantes. `--min-input-volume` (défaut 3)
 écarte les entrées trop peu vendues — miroir de `--min-volume` côté sortie — et

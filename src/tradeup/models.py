@@ -183,9 +183,31 @@ class Collection:
     def by_rarity(self, rarity: Rarity) -> tuple[Skin, ...]:
         return tuple(s for s in self.skins if s.rarity is rarity)
 
-    def outcomes_for_input_rarity(self, rarity: Rarity) -> tuple[Skin, ...]:
-        """Skins pouvant sortir d'un trade-up alimente par cette collection."""
+    def outcomes_for_input_rarity(
+        self, rarity: Rarity, stattrak: bool = False
+    ) -> tuple[Skin, ...]:
+        """Skins pouvant sortir d'un trade-up alimente par cette collection.
+
+        Un contrat StatTrak ne produit que du StatTrak : les skins sans variante
+        StatTrak sortent de l'ensemble des issues possibles. Ce n'est pas un
+        detail d'affichage -- la probabilite d'une sortie vaut
+        `n_C / somme(n_C' x k_C')`, donc retirer des issues REDISTRIBUE toute la
+        masse. Garder les skins non-StatTrak dans le denominateur donnerait des
+        probabilites fausses sur chaque ligne.
+        """
         target = rarity.next_up
         if target is None:
             return ()
-        return self.by_rarity(target)
+        sorties = self.by_rarity(target)
+        if stattrak:
+            sorties = tuple(s for s in sorties if s.stattrak)
+        return sorties
+
+    def inputs_for_rarity(
+        self, rarity: Rarity, stattrak: bool = False
+    ) -> tuple[Skin, ...]:
+        """Skins utilisables en entree, filtres sur l'existence d'un StatTrak."""
+        entrees = self.by_rarity(rarity)
+        if stattrak:
+            entrees = tuple(s for s in entrees if s.stattrak)
+        return entrees
