@@ -98,3 +98,63 @@ def test_db_introuvable_renvoie_un_code_derreur(tmp_path, capsys):
     code = cli.main(["--db", str(tmp_path / "absent.json"), "db"])
     assert code == 1
     assert "introuvable" in capsys.readouterr().err.lower()
+
+
+# --- Marche d'achat CSFloat --------------------------------------------------
+
+
+def test_marche_dachat_par_defaut_sur_steam():
+    a = parse("scan")
+    assert a.buy_market == "steam"
+    assert a.sell_market == "steam"
+    assert a.csfloat_rate == 10  # quota sur fenetre longue
+
+
+def test_marches_dachat_et_de_revente_independants():
+    a = parse("scan", "--buy-market", "csfloat", "--currency", "USD")
+    assert a.buy_market == "csfloat" and a.sell_market == "steam"
+
+
+def test_achat_csfloat_hors_usd_refuse(monkeypatch, capsys):
+    # Additionner un cout en USD et un produit de vente en EUR donne un nombre
+    # qui ressemble a un profit sans en etre un : mieux vaut refuser.
+    monkeypatch.setattr(cli, "csfloat_api_key", lambda *a, **k: "cle-de-test")
+    args = parse("scan", "--buy-market", "csfloat", "--currency", "EUR")
+    with pytest.raises(SystemExit) as exc:
+        cli._make_pricer(args)
+    assert exc.value.code == 2
+    assert "--buy-market csfloat" in capsys.readouterr().err
+
+
+def test_achat_et_revente_csfloat_partagent_une_seule_source(monkeypatch):
+    # Deux instances auraient chacune leur rate-limiter et emettraient le double
+    # du debit annonce -- exactement ce qui declenche les 429.
+    monkeypatch.setattr(cli, "csfloat_api_key", lambda *a, **k: "cle-de-test")
+    args = parse("scan", "--buy-market", "csfloat", "--sell-market", "csfloat",
+                 "--currency", "USD")
+    pricer, cache = cli._make_pricer(args)
+    try:
+        assert pricer.buy_source is pricer.sell_source
+        assert pricer.buy_source.name == "csfloat"
+        assert pricer.buy_fees.name == "csfloat"  # les frais suivent le marche
+        assert pricer.sell_fees.name == "csfloat"
+    finally:
+        cache.close()
+
+
+def test_duree_estimee_couvre_les_deux_marches(monkeypatch):
+    # `warm()` precharge sur chaque marche distinct : ne compter que l'achat
+    # sous-estimait l'attente de moitie.
+    monkeypatch.setattr(cli, "csfloat_api_key", lambda *a, **k: "cle-de-test")
+    seul = parse("scan", "--currency", "USD")
+    mixte = parse("scan", "--sell-market", "csfloat", "--currency", "USD")
+    p1, c1 = cli._make_pricer(seul)
+    p2, c2 = cli._make_pricer(mixte)
+    try:
+        steam_seul = p1.buy_source.estimated_duration(600)
+        deux = sum(s.estimated_duration(600)
+                   for s in dict.fromkeys([p2.buy_source, p2.sell_source]))
+        assert deux > steam_seul
+    finally:
+        c1.close()
+        c2.close()

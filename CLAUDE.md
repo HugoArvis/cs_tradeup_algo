@@ -50,13 +50,19 @@ Le raccourci `tradeup` n'est pas dans le `PATH` : passer par `python -m tradeup.
 
 | | `scan` | `plan` |
 |---|---|---|
-| Source | Steam (`MarketPricer`) | CSFloat (`plan.CSFloatPricer`) |
+| Source | Steam ou CSFloat (`MarketPricer`) | CSFloat (`plan.CSFloatPricer`) |
 | Prix | un par palier d'usure | annonces réelles |
 | Float | supposé (`--float-pct`) | exact |
 | Sélection | avec répétition | 0/1, une annonce est unique |
 | Usage | explorer sans clé API | **exécuter** |
 
 Un panier issu de `scan` n'est pas achetable tel quel.
+
+`scan` choisit indépendamment son marché d'achat (`--buy-market`) et de revente
+(`--sell-market`). Les deux exigent `--currency USD` côté CSFloat, et une seule
+instance `CSFloat` est partagée : deux rate-limiters doubleraient le débit réel.
+Un `scan` entièrement CSFloat coûte une cotation par objet et par palier —
+réservé à quelques collections, `plan` ne cote que ce qu'il achète.
 
 Si une source expose `sell_net_at_float(...)`, `evaluate()` l'utilise au lieu de
 `sell_net()` — point d'extension pour une valorisation sensible au float.

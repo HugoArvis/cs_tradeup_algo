@@ -61,14 +61,19 @@ def _make_pricer(args) -> tuple[MarketPricer, QuoteCache]:
         calls_per_minute=args.rate,
         offline=args.offline,
     )
-    # Marche de REVENTE distinct : acheter sur Steam et revendre sur CSFloat est
-    # une strategie courante (le porte-monnaie Steam n'est pas retirable, celui
-    # de CSFloat oui). Mais les deux marches ne cotent pas dans la meme monnaie
-    # ni au meme niveau : il faut les prix REELS de chacun, pas les frais de
-    # l'un appliques aux prix de l'autre.
-    sell_source = steam
-    sell_fees = args.sell_fees
-    if getattr(args, "sell_market", "steam") == "csfloat":
+
+    partage: list[CSFloat] = []
+
+    def csfloat_source(role: str) -> CSFloat:
+        """Source CSFloat, creee une seule fois.
+
+        Une SEULE instance meme si achat et revente passent tous deux par
+        CSFloat : deux clients auraient chacun leur rate-limiter et emettraient
+        donc le double du debit annonce -- exactement ce qui declenche les 429
+        sur une fenetre longue.
+        """
+        if partage:
+            return partage[0]
         key = csfloat_api_key(getattr(args, "api_key", None))
         if not key:
             print("Cle API CSFloat absente (voir .env).", file=sys.stderr)
@@ -82,11 +87,36 @@ def _make_pricer(args) -> tuple[MarketPricer, QuoteCache]:
                 f"ERREUR : CSFloat cote en USD, Steam en {args.currency}.\n"
                 f"Calculer un profit en additionnant deux monnaies n'a pas de "
                 f"sens. Relance avec :\n"
-                f"  --currency USD --sell-market csfloat",
+                f"  --currency USD --{role}-market csfloat",
                 file=sys.stderr,
             )
             raise SystemExit(2)
-        sell_source = CSFloat(key, cache=cache, calls_per_minute=10)
+        source = CSFloat(
+            key,
+            cache=cache,
+            calls_per_minute=getattr(args, "csfloat_rate", 10),
+            offline=getattr(args, "offline", False),
+        )
+        partage.append(source)
+        return source
+
+    # Marche d'ACHAT : Steam par defaut, CSFloat si demande. Acheter sur CSFloat
+    # rapproche `scan` de ce que `plan` executera vraiment -- au prix du quota.
+    buy_source = steam
+    buy_fees = args.buy_fees
+    if getattr(args, "buy_market", "steam") == "csfloat":
+        buy_source = csfloat_source("buy")
+        buy_fees = "csfloat"
+
+    # Marche de REVENTE distinct : acheter sur Steam et revendre sur CSFloat est
+    # une strategie courante (le porte-monnaie Steam n'est pas retirable, celui
+    # de CSFloat oui). Mais les deux marches ne cotent pas dans la meme monnaie
+    # ni au meme niveau : il faut les prix REELS de chacun, pas les frais de
+    # l'un appliques aux prix de l'autre.
+    sell_source = steam
+    sell_fees = args.sell_fees
+    if getattr(args, "sell_market", "steam") == "csfloat":
+        sell_source = csfloat_source("sell")
         sell_fees = "csfloat"
     elif args.sell_fees != steam.name:
         print(
@@ -98,9 +128,9 @@ def _make_pricer(args) -> tuple[MarketPricer, QuoteCache]:
         )
 
     pricer = MarketPricer(
-        steam,
+        buy_source,
         sell_source,
-        buy_fees=args.buy_fees,
+        buy_fees=buy_fees,
         sell_fees=sell_fees,
         safety_margin=args.margin,
         min_volume=args.min_volume,
@@ -365,15 +395,28 @@ def cmd_scan(args) -> int:
         collections = [c for c in wanted if c is not None]
 
     names = required_market_names(db, collections, rarity)
-    steam: SteamMarket = pricer.buy_source  # type: ignore[assignment]
+    # `warm()` precharge sur CHAQUE marche distinct : compter le seul marche
+    # d'achat sous-estimait l'attente de moitie des que la revente differait.
+    sources = list(dict.fromkeys([pricer.buy_source, pricer.sell_source]))
 
     if not args.offline:
-        eta = steam.estimated_duration(len(names)) / 60
+        eta = sum(s.estimated_duration(len(names)) for s in sources) / 60
+        marches = " + ".join(s.name for s in sources)
         print(
             f"{len(collections)} collections -> {len(names)} cotations a recuperer "
-            f"(~{eta:.0f} min au rythme de {args.rate}/min).",
+            f"sur {marches} (~{eta:.0f} min).",
             file=sys.stderr,
         )
+        if any(s.name == "csfloat" for s in sources):
+            # Le quota CSFloat porte sur une fenetre longue : un scan large le
+            # vide, et le 429 qui suit ne se rattrape pas en reessayant.
+            print(
+                f"ATTENTION : {len(names)} cotations CSFloat sur une fenetre de "
+                f"quota longue. Au-dela de quelques collections le quota saute "
+                f"et rien ne le rattrape : restreins avec --collections, ou "
+                f"passe par `plan` qui ne cote que ce qu'il achete.",
+                file=sys.stderr,
+            )
         if eta > 5 and not args.yes:
             print(
                 "Relance avec --yes pour confirmer, ou --offline pour "
@@ -460,12 +503,11 @@ def cmd_scan(args) -> int:
 
     # Sans cette ligne, rien dans l'affichage ne dit en quelle monnaie sont les
     # montants -- et `plan` sort des USD quand `scan` sort des EUR par defaut.
-    revente = (
-        "CSFloat (USD)"
-        if getattr(args, "sell_market", "steam") == "csfloat"
-        else f"Steam ({args.currency})"
-    )
-    print(f"Achat : Steam ({args.currency})   |   Revente : {revente}")
+    # Les deux marches ne cotent pas dans la meme monnaie : sans cette ligne,
+    # rien dans l'affichage ne dit laquelle on lit.
+    achat = f"{pricer.buy_source.name} ({args.currency})"
+    revente = f"{pricer.sell_source.name} ({args.currency})"
+    print(f"Achat : {achat}   |   Revente : {revente}")
     print(f"Tous les montants ci-dessous sont en {args.currency}.")
 
     for i, cand in enumerate(candidates, 1):
@@ -586,9 +628,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="marge minimale exigee avant la falaise d'usure")
     s.add_argument("--buy-fees", default="steam", choices=sorted(FEE_MODELS))
     s.add_argument("--sell-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--buy-market", default="steam", choices=("steam", "csfloat"),
+                   help="marche d'ACHAT des entrees : csfloat prend ses vrais "
+                        "prix (utiliser avec --currency USD ; gros consommateur "
+                        "de quota)")
     s.add_argument("--sell-market", default="steam", choices=("steam", "csfloat"),
                    help="marche de REVENTE : csfloat prend ses vrais prix "
                         "(utiliser avec --currency USD)")
+    s.add_argument("--csfloat-rate", type=int, default=10,
+                   help="requetes CSFloat par minute (quota sur fenetre longue : "
+                        "ne pas monter sans raison)")
     s.add_argument("--api-key", default=None, help="cle CSFloat, sinon lue depuis .env")
     add_pricing_args(s)
     s.set_defaults(func=cmd_scan)

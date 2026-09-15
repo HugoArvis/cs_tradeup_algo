@@ -208,10 +208,3 @@ class SteamMarket(PriceSource):
         found = m.group(1) if m else None
         self._name_ids[market_hash_name] = found
         return found
-
-    def estimated_duration(self, n_names: int) -> float:
-        """Duree approximative d'un lot de `n_names` requetes, en secondes."""
-        limiter = self.client.limiter
-        if not limiter or n_names <= limiter.max_calls:
-            return 0.0
-        return (n_names / limiter.max_calls - 1) * limiter.period

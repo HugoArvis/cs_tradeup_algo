@@ -180,3 +180,27 @@ def test_fetch_sans_offre_renvoie_none():
 def test_cle_api_obligatoire():
     with pytest.raises(ValueError, match="[Cc]le API"):
         CSFloat("")
+
+
+def test_mode_hors_ligne_ne_touche_pas_au_reseau(tmp_path):
+    """`scan --offline` ne doit pas appeler CSFloat, quota ou pas."""
+    from tradeup.pricing.cache import QuoteCache
+    from tradeup.pricing.base import Quote
+
+    cache = QuoteCache(path=tmp_path / "c.db")
+    cache.put(Quote("AK-47 | Redline (Field-Tested)", "csfloat", 10.0, 11.0,
+                    None, currency="USD"))
+    source = CSFloat("cle", cache=cache, offline=True)
+
+    def interdit(*a, **k):
+        raise AssertionError("appel reseau en mode hors ligne")
+
+    source.client.get_json = interdit
+    assert source.fetch("AK-47 | Redline (Field-Tested)") is not None
+    assert source.fetch("objet absent du cache") is None
+    cache.close()
+
+
+def test_hors_ligne_sans_cache_refuse():
+    with pytest.raises(ValueError):
+        CSFloat("cle", offline=True)

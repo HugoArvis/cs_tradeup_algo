@@ -63,6 +63,17 @@ class PriceSource(ABC):
                 out[n] = q
         return out
 
+    def estimated_duration(self, n_names: int) -> float:
+        """Duree approximative d'un lot de `n_names` requetes, en secondes.
+
+        Deduite du rate-limiter du client HTTP : c'est lui qui impose le rythme,
+        pas la source. Une source sans limiteur repond aussi vite qu'elle peut.
+        """
+        limiter = getattr(getattr(self, "client", None), "limiter", None)
+        if limiter is None or n_names <= limiter.max_calls:
+            return 0.0
+        return (n_names / limiter.max_calls - 1) * limiter.period
+
 
 _MONEY_RE = re.compile(r"[-+]?[\d\s .,]+")
 

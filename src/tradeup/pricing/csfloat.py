@@ -97,12 +97,16 @@ class CSFloat(PriceSource):
         currency: str = "USD",
         client: HttpClient | None = None,
         ttl_seconds: float = 3 * 3600,
+        offline: bool = False,
     ):
         if not api_key:
             raise ValueError("Cle API CSFloat requise")
+        if offline and cache is None:
+            raise ValueError("Le mode hors ligne exige un cache")
         self.currency = currency
         self.cache = cache
         self.ttl = ttl_seconds
+        self.offline = offline
         self.client = client or HttpClient(
             rate_limiter=RateLimiter(max_calls=calls_per_minute, period=60.0),
             headers={"Authorization": api_key},
@@ -110,11 +114,16 @@ class CSFloat(PriceSource):
 
     def fetch(self, market_hash_name: str, *, use_cache: bool = True) -> Quote | None:
         if use_cache and self.cache:
+            # Hors ligne, on accepte n'importe quel age : le quota CSFloat rend
+            # un prix perime bien plus utile qu'une absence de prix.
+            ttl = float("inf") if self.offline else self.ttl
             cached = self.cache.get(
-                market_hash_name, self.name, ttl=self.ttl, currency=self.currency
+                market_hash_name, self.name, ttl=ttl, currency=self.currency
             )
             if cached is not None:
                 return cached
+        if self.offline:
+            return None
 
         listings = self.listings(market_hash_name, limit=10)
         if not listings:
