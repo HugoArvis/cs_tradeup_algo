@@ -28,6 +28,7 @@ python -m pytest tests/test_core.py -k probabilites
 python scripts/check_js.py            # apres toute retouche du JS de web.py
 python -m tradeup.web                 # application locale, port 8765
 python -m tradeup.cli plan "The Bank Collection" --rarity industrial --html
+python -m tradeup.cli verify --collection "The Bank Collection" --rarity industrial
 ```
 
 Le raccourci `tradeup` n'est pas dans le `PATH` : passer par `python -m tradeup.cli`.
@@ -101,6 +102,12 @@ les expose pour dire combien de temps une revente prendra.
 
 **`all_outcomes_profitable` prime sur le nombre de sorties** — trois issues
 toutes rentables valent mieux qu'une issue unique au gain marginal.
+
+**Une dérive se lit du côté du portefeuille, pas du prix.** Une entrée qui
+renchérit et une sortie qui se déprécie sont toutes deux défavorables, avec des
+signes opposés en variation brute. `refresh.Drift.impact` porte ce signe ;
+`verify` sort en code 1 dès qu'une dérive défavorable dépasse le seuil, pour
+qu'un script s'arrête avant d'exécuter.
 
 **L'API CSFloat cote en USD**, le site facture dans la devise du profil.
 `web.App.conv()` convertit ; le cache SQLite indexe par devise.

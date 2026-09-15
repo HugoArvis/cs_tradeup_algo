@@ -51,8 +51,16 @@ class PriceSource(ABC):
     name: str
 
     @abstractmethod
-    def fetch(self, market_hash_name: str) -> Quote | None:
+    def fetch(self, market_hash_name: str, *, use_cache: bool = True) -> Quote | None:
         """Recupere un prix, ou None si l'objet est introuvable."""
+
+    def refresh(self, market_hash_name: str) -> Quote | None:
+        """Force un appel reseau, en ignorant le cache.
+
+        A utiliser juste avant d'executer un contrat : les prix bougent vite et
+        une cotation de plusieurs heures ne vaut rien pour une decision.
+        """
+        return self.fetch(market_hash_name, use_cache=False)
 
     def fetch_many(self, names: list[str]) -> dict[str, Quote]:
         """Version par lot ; surchargee quand l'API supporte le batch."""

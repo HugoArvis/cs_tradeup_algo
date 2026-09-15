@@ -158,3 +158,26 @@ def test_duree_estimee_couvre_les_deux_marches(monkeypatch):
     finally:
         c1.close()
         c2.close()
+
+
+# --- Commande verify ---------------------------------------------------------
+
+
+def test_verify_est_declaree():
+    a = parse("verify", "AK-47 | Redline (Field-Tested)")
+    assert a.func is cli.cmd_verify
+    assert a.names == ["AK-47 | Redline (Field-Tested)"]
+    assert a.market == "steam"
+    assert a.max_drift == 0.05
+
+
+def test_verify_sans_cible_refuse(capsys):
+    # Ne rien verifier silencieusement donnerait un "tout va bien" mensonger.
+    code = cli.main(["verify"])
+    assert code == 2
+    assert "Rien a verifier" in capsys.readouterr().err
+
+
+def test_verify_collection_introuvable(capsys):
+    assert cli.main(["verify", "--collection", "Collection Imaginaire"]) == 1
+    assert "introuvable" in capsys.readouterr().err.lower()

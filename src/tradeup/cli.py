@@ -26,6 +26,7 @@ from .pricing.steam import CURRENCIES, SteamMarket
 from .plan import build_plan
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
+from .refresh import DEFAULT_DRIFT_THRESHOLD, collection_roles, refresh_quotes
 from .report import write_and_open
 from .scan import prefetch, required_market_names, scan
 from .liquidity import execution_capacity
@@ -533,12 +534,105 @@ def cmd_scan(args) -> int:
             print(explain(cand.result))
 
     print(
-        "\nRappel : ces chiffres sont des ESPERANCES. Reverifie chaque ligne avec "
-        "`python -m tradeup.cli price \"<nom>\" --fresh` juste avant d'executer.",
+        f"\nRappel : ces chiffres sont des ESPERANCES, calcules sur un jeu de "
+        f"prix fige. Recote avant d'executer :\n"
+        f"  python -m tradeup.cli verify --collection \"<collection>\" "
+        f"--rarity {args.rarity} --market {pricer.buy_source.name}",
         file=sys.stderr,
     )
     cache.close()
     return 0
+
+
+def cmd_verify(args) -> int:
+    """Recote des objets et dit ce qui a bouge depuis le dernier releve.
+
+    C'est le dernier geste avant d'executer : un scan travaille sur un jeu de
+    prix fige de plusieurs heures, et la marge d'un trade-up ne survit pas a
+    une derive de quelques pour cent.
+    """
+    cache = QuoteCache(ttl_seconds=args.ttl * 3600)
+
+    if args.market == "csfloat":
+        key = csfloat_api_key(args.api_key)
+        if not key:
+            print("Cle API CSFloat absente (voir .env).", file=sys.stderr)
+            cache.close()
+            return 1
+        source = CSFloat(key, cache=cache, calls_per_minute=args.rate)
+    else:
+        source = SteamMarket(currency=args.currency, cache=cache,
+                             calls_per_minute=args.rate)
+
+    roles: dict[str, str] = {}
+    names = list(args.names)
+
+    if args.collection:
+        db = SkinDatabase.load(args.db)
+        col = db.find_collection(args.collection)
+        if col is None:
+            print(f"Collection introuvable : {args.collection!r}", file=sys.stderr)
+            cache.close()
+            return 1
+        roles = collection_roles(col, RARITY_ALIASES[args.rarity])
+        names += [n for n in roles if n not in names]
+
+    if not names:
+        print(
+            "Rien a verifier. Donne des noms d'objets, ou --collection pour "
+            "reprendre tout un contrat :\n"
+            '  python -m tradeup.cli verify --collection "The Bank Collection" '
+            "--rarity industrial",
+            file=sys.stderr,
+        )
+        cache.close()
+        return 2
+
+    if args.stale is not None:
+        # Recoter ce qui est encore frais gaspille du quota pour confirmer un
+        # chiffre qu'on vient de lire.
+        ages = {n: _age_cache(cache, n, source) for n in names}
+        frais = [n for n, a in ages.items() if a is not None and a < args.stale * 3600]
+        inconnus = [n for n, a in ages.items() if a is None]
+        names = [n for n in names if n not in frais]
+        # Les objets jamais cotes sont gardes : un panier ne se verifie pas avec
+        # des trous. Mais il faut le dire, sinon --stale semble n'avoir rien
+        # filtre alors qu'il a fait son travail.
+        print(f"{len(frais)} cotations de moins de {args.stale:g} h, ignorees.",
+              file=sys.stderr)
+        if inconnus:
+            print(f"{len(inconnus)} objets jamais cotes : gardes malgre --stale.",
+                  file=sys.stderr)
+        if not names:
+            print("Tout est frais : rien a recoter.")
+            cache.close()
+            return 0
+
+    eta = source.estimated_duration(len(names)) / 60
+    print(f"{len(names)} objets a recoter sur {source.name} (~{eta:.0f} min).",
+          file=sys.stderr)
+    if eta > 5 and not args.yes:
+        print("Relance avec --yes pour confirmer.", file=sys.stderr)
+        cache.close()
+        return 2
+
+    report = refresh_quotes(
+        source, names, cache=cache, roles=roles, seuil=args.max_drift,
+        progress=_progress("recotation"),
+    )
+    print()
+    print(report.report())
+    cache.close()
+    # Code de sortie exploitable dans un script : 1 signale qu'il ne faut pas
+    # executer le contrat sans avoir recalcule.
+    return 1 if report.a_recalculer else 0
+
+
+def _age_cache(cache: QuoteCache, name: str, source) -> float | None:
+    """Age du dernier releve en secondes, None si l'objet n'a jamais ete cote."""
+    q = cache.get(name, source.name, ttl=float("inf"),
+                  currency=getattr(source, "currency", None))
+    return q.age_seconds if q else None
 
 
 def cmd_cache(args) -> int:
@@ -661,6 +755,26 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-open", action="store_true",
                    help="ecrire la page sans ouvrir le navigateur")
     s.set_defaults(func=cmd_plan)
+
+    s = sub.add_parser("verify",
+                       help="recoter et mesurer la derive depuis le dernier releve")
+    s.add_argument("names", nargs="*", metavar="NOM",
+                   help="market_hash_name a verifier")
+    s.add_argument("--collection", default=None,
+                   help="reprendre entrees ET sorties de toute une collection")
+    s.add_argument("--rarity", default="mil-spec", choices=sorted(RARITY_ALIASES),
+                   help="rarete d'ENTREE, avec --collection")
+    s.add_argument("--market", default="steam", choices=("steam", "csfloat"))
+    s.add_argument("--max-drift", type=float, default=DEFAULT_DRIFT_THRESHOLD,
+                   help="derive defavorable qui declenche l'alerte "
+                        "(defaut 5 %%, code de sortie 1)")
+    s.add_argument("--stale", type=float, nargs="?", const=6.0, default=None,
+                   metavar="HEURES",
+                   help="ne recoter que ce qui date de plus de N heures")
+    s.add_argument("--yes", action="store_true", help="ne pas demander confirmation")
+    s.add_argument("--api-key", default=None, help="cle CSFloat, sinon lue depuis .env")
+    add_pricing_args(s)
+    s.set_defaults(func=cmd_verify)
 
     s = sub.add_parser("cache", help="etat du cache de prix")
     s.add_argument("--prune", type=float, nargs="?", const=30.0, default=None,

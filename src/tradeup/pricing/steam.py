@@ -130,14 +130,6 @@ class SteamMarket(PriceSource):
             self.cache.put(quote)
         return quote
 
-    def refresh(self, market_hash_name: str) -> Quote | None:
-        """Force un appel reseau, en ignorant le cache.
-
-        A utiliser juste avant d'executer un contrat : les prix bougent vite et
-        une cotation de plusieurs heures ne vaut rien pour une decision.
-        """
-        return self.fetch(market_hash_name, use_cache=False)
-
     def order_book(self, market_hash_name: str) -> "OrderBook | None":
         """Carnet d'ordres Steam : meilleur ordre d'ACHAT et meilleure vente.
 
