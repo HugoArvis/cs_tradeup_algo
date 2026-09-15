@@ -212,3 +212,104 @@ def test_le_libelle_de_rarete_est_uniforme():
     # ligne d'historique doit rester identifiable.
     assert libelle_rarete("rarete-disparue") == "rarete-disparue"
     assert libelle_rarete(None) == ""
+
+
+# --- Onglet inventaire -------------------------------------------------------
+
+
+def inventaire_de_test(n=10, nom="Arme A (Factory New)"):
+    from tradeup.inventory import OwnedItem
+
+    return [
+        OwnedItem(market_hash_name=nom, float_value=0.01 + i * 0.001,
+                  asset_id=f"a{i}", tradable=True)
+        for i in range(n)
+    ]
+
+
+def test_lapercu_annonce_le_cout_avant_de_lancer(app, monkeypatch):
+    """Regle de l'application : le quota se voit AVANT d'etre depense."""
+    monkeypatch.setattr(app, "inventaire", lambda **k: inventaire_de_test())
+    monkeypatch.setattr(app, "load_currency", lambda: None)
+
+    d = app.inventory_overview("mil-spec")
+    assert d["summary"]["objets"] == 10
+    assert d["buildable"] and d["buildable"][0]["owned"] == 10
+    # 1 nom d'entree distinct + 1 sortie x 5 usures.
+    assert d["requests"] == 6
+
+
+def test_lapercu_chiffre_lecart_quand_il_manque_des_objets(app, monkeypatch):
+    """Sans ca, "aucun contrat" est indiscernable d'une panne."""
+    monkeypatch.setattr(app, "inventaire", lambda **k: inventaire_de_test(n=4))
+    monkeypatch.setattr(app, "load_currency", lambda: None)
+
+    d = app.inventory_overview("mil-spec")
+    assert d["buildable"] == []
+    assert d["requests"] == 0
+    assert d["gaps"][0] == {"collection": "Collection A", "owned": 4}
+
+
+def test_le_calcul_dinventaire_produit_un_resultat_exploitable(app, monkeypatch):
+    from tradeup.pricing.repository import StaticPricer
+
+    prix = {}
+    for nom in ("Arme A", "Sortie A"):
+        for usure in ("Factory New", "Minimal Wear", "Field-Tested",
+                      "Well-Worn", "Battle-Scarred"):
+            prix[f"{nom} ({usure})"] = 1.0 if nom == "Arme A" else 40.0
+
+    monkeypatch.setattr(app, "inventaire", lambda **k: inventaire_de_test())
+    monkeypatch.setattr(app, "load_currency", lambda: None)
+    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: None)
+    monkeypatch.setattr("tradeup.web.CSFloatPricer",
+                        lambda *a, **k: StaticPricer(prix))
+
+    job = app.start_inventory("mil-spec")
+    for _ in range(100):
+        if job.state != "running":
+            break
+        time.sleep(0.05)
+
+    assert job.state == "done"
+    payload = app.inventory_job_payload(job)
+    ligne = payload["results"][0]
+    assert ligne["collection"] == "Collection A"
+    assert ligne["rarity"] == "Mil-Spec Grade"
+    assert len(ligne["inputs"]) == 10
+    assert ligne["outcomes"]
+    # Les entrees sont valorisees a leur prix de REVENTE, jamais a zero.
+    assert ligne["opportunity_cost"] > 0
+    assert ligne["gain"] == pytest.approx(ligne["net"] - ligne["opportunity_cost"],
+                                          abs=0.02)
+
+
+def test_un_quota_epuise_donne_un_etat_lisible(app, monkeypatch):
+    def boum(*a, **k):
+        raise RateLimited("429")
+
+    monkeypatch.setattr(app, "inventaire", boum)
+    job = app.start_inventory("mil-spec")
+    for _ in range(100):
+        if job.state != "running":
+            break
+        time.sleep(0.05)
+    assert job.state == "quota"
+    assert "quota" in app.inventory_job_payload(job)["message"].lower()
+
+
+def test_linventaire_nest_pas_relu_a_chaque_clic(app, monkeypatch):
+    """Une lecture coute une requete et l'inventaire ne bouge pas entre deux clics."""
+    appels = []
+
+    class FakeSource:
+        def inventory(self):
+            appels.append(1)
+            return []
+
+    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: FakeSource())
+    app.inventaire()
+    app.inventaire()
+    assert len(appels) == 1
+    app.inventaire(force=True)  # le bouton "Relire" doit, lui, retaper l'API
+    assert len(appels) == 2

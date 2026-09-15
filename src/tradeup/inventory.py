@@ -345,22 +345,23 @@ def best_tradeups(
     suppose posseder assez d'objets dans chacune, ce qui est rare, et multiplie
     les combinaisons sans rien apporter tant que le cas simple n'est pas couvert.
     """
-    apparies = resolve(db, items)
-    couples = _options(apparies, prices, stattrak)
-
-    # Regrouper par collection : un contrat ne melange pas n'importe quoi, et
-    # seules les collections ou l'on possede 10 objets a la bonne rarete
-    # peuvent produire quoi que ce soit.
-    par_collection: dict[str, list[tuple[InputOption, OwnedItem]]] = {}
-    for option, item in couples:
-        if option.skin.rarity is not rarity:
+    # Regrouper AVANT de valoriser. Un contrat exige dix objets de la meme
+    # collection : les collections qui n'en ont pas assez ne produiront rien,
+    # et les coter serait du quota depense pour rien -- sur CSFloat, chaque
+    # valorisation est une requete.
+    candidats: dict[str, list[tuple[OwnedItem, Skin]]] = {}
+    for item, skin in resolve(db, items):
+        if skin.rarity is not rarity or item.stattrak != stattrak:
             continue
-        par_collection.setdefault(option.skin.collection_id, []).append((option, item))
+        candidats.setdefault(skin.collection_id, []).append((item, skin))
 
     plans: list[InventoryTradeUp] = []
-    for cid, groupe in par_collection.items():
-        if len(groupe) < TRADEUP_INPUT_COUNT:
+    for cid, apparies in candidats.items():
+        if len(apparies) < TRADEUP_INPUT_COUNT:
             continue
+        groupe = _options(apparies, prices, stattrak)
+        if len(groupe) < TRADEUP_INPUT_COUNT:
+            continue  # des objets sans prix de revente connu
         collection = db.collection(cid)
         sorties = collection.outcomes_for_input_rarity(rarity, stattrak)
         if not sorties:
@@ -436,6 +437,54 @@ def summary(db: SkinDatabase, items: Sequence[OwnedItem]) -> dict:
         "en_vente": sum(1 for i in items if i.listed),
         "par_rarete": dict(sorted(par_rarete.items())),
     }
+
+
+def buildable_collections(
+    db: SkinDatabase,
+    items: Sequence[OwnedItem],
+    rarity: Rarity,
+    *,
+    stattrak: bool = False,
+) -> list[dict]:
+    """Collections ou un contrat est possible, et ce qu'il coutera a evaluer.
+
+    Le cout est en requetes CSFloat : une par objet de marche distinct, entrees
+    possedees ET sorties possibles. L'afficher AVANT de lancer est la regle de
+    l'application -- le quota se vide vite et sans prevenir.
+    """
+    par_collection: dict[str, list[tuple[OwnedItem, Skin]]] = {}
+    for item, skin in resolve(db, items):
+        if skin.rarity is not rarity or item.stattrak != stattrak:
+            continue
+        par_collection.setdefault(skin.collection_id, []).append((item, skin))
+
+    rows = []
+    for cid, apparies in par_collection.items():
+        if len(apparies) < TRADEUP_INPUT_COUNT:
+            continue
+        collection = db.collection(cid)
+        sorties = collection.outcomes_for_input_rarity(rarity, stattrak)
+        if not sorties:
+            continue
+        # Un meme nom de marche n'est cote qu'une fois, meme possede en dix
+        # exemplaires : c'est le carnet du skin qu'on lit, pas l'objet.
+        noms_entrees = {
+            skin.market_hash_name(wear_of(item.float_value), stattrak)
+            for item, skin in apparies
+        }
+        noms_sorties = {
+            s.market_hash_name(w, stattrak)
+            for s in sorties for w in s.available_wears()
+        }
+        rows.append({
+            "id": cid,
+            "name": collection.name,
+            "owned": len(apparies),
+            "outcomes": len(sorties),
+            "requests": len(noms_entrees) + len(noms_sorties),
+        })
+    rows.sort(key=lambda r: (-r["owned"], r["name"]))
+    return rows
 
 
 def closest_gaps(

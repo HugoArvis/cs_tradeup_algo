@@ -32,9 +32,16 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import csfloat_api_key
 from .db import SkinDatabase
+from .inventory import (
+    best_tradeups as best_inventory_tradeups,
+    buildable_collections,
+    closest_gaps as inventory_gaps,
+    from_csfloat_rows,
+    summary as inventory_summary,
+)
 from .journal import Journal
 from .models import Rarity
-from .plan import Plan, build_plan
+from .plan import CSFloatPricer, Plan, build_plan
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
 from .report import render as render_report
@@ -112,6 +119,28 @@ class Batch:
         return traites / self.total if self.total else 0.0
 
 
+@dataclass
+class InventoryJob:
+    """Calcul des contrats realisables avec l'inventaire, en tache de fond.
+
+    Meme raison qu'un plan : valoriser les objets possedes demande une requete
+    CSFloat par nom de marche, donc des minutes. Une requete HTTP bloquante
+    donnerait une page figee.
+    """
+
+    id: str
+    rarity: str
+    state: str = "running"  # running | done | empty | error | quota
+    message: str = ""
+    results: list[dict] = field(default_factory=list)
+    gaps: list[dict] = field(default_factory=list)
+    started: float = field(default_factory=time.time)
+
+    @property
+    def elapsed(self) -> float:
+        return time.time() - self.started
+
+
 class App:
     """Etat partage du serveur : base, cle, taches."""
 
@@ -122,6 +151,11 @@ class App:
         self.rate = rate
         self.jobs: dict[str, Job] = {}
         self.batches: dict[str, Batch] = {}
+        self.inventory_jobs: dict[str, InventoryJob] = {}
+        # L'inventaire coute une requete a lire et ne bouge pas entre deux
+        # clics : le relire a chaque affichage gaspillerait du quota.
+        self._inventaire: list | None = None
+        self._inventaire_lu: float = 0.0
         self.journal = journal or Journal()
         self._lock = threading.Lock()
         # L'API CSFloat cote en USD, mais le site affiche -- et facture -- dans
@@ -170,6 +204,144 @@ class App:
             )
         rows.sort(key=lambda r: (r["outcomes"], r["name"]))
         return rows
+
+    # --- Inventaire ---
+
+    def inventaire(self, *, force: bool = False) -> list:
+        """Objets possedes, relus au plus une fois par minute.
+
+        Une lecture coute une requete et l'inventaire ne change pas entre deux
+        clics de l'interface.
+        """
+        if not force and self._inventaire is not None:
+            if time.time() - self._inventaire_lu < 60:
+                return self._inventaire
+        source = CSFloat(self._api_key, calls_per_minute=self.rate)
+        self._inventaire = from_csfloat_rows(source.inventory())
+        self._inventaire_lu = time.time()
+        return self._inventaire
+
+    def inventory_overview(self, rarity_name: str, *, force: bool = False) -> dict:
+        """Ce que contient l'inventaire et ce qu'un calcul couterait.
+
+        Le cout est annonce AVANT de lancer, comme pour un plan : le quota
+        CSFloat se vide vite, et l'utilisateur doit pouvoir renoncer.
+        """
+        self.load_currency()
+        items = self.inventaire(force=force)
+        rarity = RARITES[rarity_name]
+        constructibles = buildable_collections(self.db, items, rarity)
+        return {
+            "rarity": rarity.label,
+            "currency": self.currency,
+            "summary": inventory_summary(self.db, items),
+            "buildable": constructibles,
+            "requests": sum(c["requests"] for c in constructibles),
+            "gaps": [
+                {"collection": nom, "owned": n}
+                for nom, n in inventory_gaps(self.db, items, rarity)
+            ],
+            "read_at": self._inventaire_lu,
+        }
+
+    def start_inventory(self, rarity_name: str) -> InventoryJob:
+        job = InventoryJob(id=uuid.uuid4().hex[:12], rarity=rarity_name)
+        with self._lock:
+            self.inventory_jobs[job.id] = job
+        threading.Thread(
+            target=self._run_inventory, args=(job,), daemon=True
+        ).start()
+        return job
+
+    def _run_inventory(self, job: InventoryJob) -> None:
+        try:
+            self.load_currency()
+            items = self.inventaire()
+            rarity = RARITES[job.rarity]
+            source = CSFloat(self._api_key, calls_per_minute=self.rate)
+            pricer = CSFloatPricer(source)
+
+            plans = best_inventory_tradeups(
+                self.db, items, pricer, rarity,
+                # On montre aussi les perdants : c'est une information, pas un
+                # echec. Savoir que dix skins valent plus vendus que fondus
+                # vaut mieux que de ne rien afficher.
+                include_losing=True,
+            )
+            job.results = [self._inventory_dict(p) for p in plans]
+            job.gaps = [
+                {"collection": nom, "owned": n}
+                for nom, n in inventory_gaps(self.db, items, rarity)
+            ]
+            if not plans:
+                job.state = "empty"
+                job.message = (
+                    f"Aucun contrat realisable en {rarity.label} : il faut dix "
+                    f"objets de la meme collection a cette rarete."
+                )
+            else:
+                job.state = "done"
+                rentables = sum(1 for p in plans if p.gain > 0)
+                job.message = (
+                    f"{len(plans)} contrat(s) possible(s), {rentables} rentable(s)."
+                )
+        except RateLimited:
+            job.state = "quota"
+            job.message = (
+                "Quota CSFloat epuise. Attendez quelques minutes : reessayer "
+                "tout de suite ne fait qu'aggraver."
+            )
+        except Exception as exc:  # noqa: BLE001 - remonte tel quel a l'interface
+            job.state = "error"
+            job.message = str(exc)
+            log.exception("calcul d'inventaire echoue")
+
+    def _inventory_dict(self, plan) -> dict:
+        """Serialise un contrat d'inventaire, montants dans la devise du compte."""
+        r = plan.result
+        return {
+            "collection": plan.collection.name,
+            "rarity": plan.rarity.label,
+            "currency": self.currency,
+            # Ce que les dix entrees rapporteraient VENDUES : fondre, c'est y
+            # renoncer. Ce n'est pas ce qu'on les a payees.
+            "opportunity_cost": self.conv(plan.opportunity_cost),
+            "net": self.conv(r.ev_net),
+            "gain": self.conv(plan.gain),
+            "roi": round(r.roi, 4),
+            "avg_float": round(r.avg_input_float, 5),
+            "decorated": [i.market_hash_name for i in plan.decorated_inputs],
+            "listed": [i.market_hash_name for i in plan.listed_inputs],
+            "inputs": [
+                {
+                    "name": o.name,
+                    "float": round(o.float_value, 5),
+                    "value": self.conv(o.unit_cost),
+                }
+                for o in plan.options
+            ],
+            "outcomes": [
+                {
+                    "name": o.name,
+                    "probability": round(o.probability, 4),
+                    "float": round(o.float_value, 5),
+                    "net": self.conv(o.net_value),
+                }
+                for o in r.outcomes
+            ],
+        }
+
+    def inventory_job_payload(self, job: InventoryJob) -> dict:
+        return {
+            "id": job.id,
+            "state": job.state,
+            "message": job.message,
+            "elapsed": round(job.elapsed),
+            "rarity": libelle_rarete(job.rarity),
+            "currency": self.currency,
+            "results": job.results,
+            "gaps": job.gaps,
+        }
 
     def start_plan(self, collection_id: str, rarity_name: str) -> Job:
         job = Job(id=uuid.uuid4().hex[:12], collection_id=collection_id,
@@ -484,6 +656,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "balayage inconnu"}, 404)
                 return
             self._json(self.app.batch_payload(batch))
+        elif route.path == "/api/inventory":
+            rarity = (params.get("rarity") or ["mil-spec"])[0]
+            if rarity not in RARITES:
+                self._json({"error": "rarete inconnue"}, 400)
+                return
+            force = (params.get("force") or ["0"])[0] == "1"
+            try:
+                self._json(self.app.inventory_overview(rarity, force=force))
+            except RateLimited:
+                self._json({"error": "Quota CSFloat epuise. Attendez quelques "
+                                     "minutes avant de relire l'inventaire."}, 429)
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 502)
+        elif route.path.startswith("/api/inventory-job/"):
+            job = self.app.inventory_jobs.get(route.path.rsplit("/", 1)[-1])
+            if job is None:
+                self._json({"error": "calcul inconnu"}, 404)
+                return
+            self._json(self.app.inventory_job_payload(job))
         elif route.path == "/api/history":
             plans = self.app.journal.plans(limit=40)
             for ligne in plans:
@@ -527,6 +718,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         j = self.app.journal
+        if chemin == "/api/inventory":
+            rarity = corps.get("rarity", "mil-spec")
+            if rarity not in RARITES:
+                self._json({"error": "rarete inconnue"}, 400)
+                return
+            job = self.app.start_inventory(rarity)
+            self._json({"id": job.id})
+            return
+
         if chemin == "/api/batch":
             rarity = corps.get("rarity", "mil-spec")
             if rarity not in RARITES:
@@ -700,6 +900,7 @@ vertical-align:-2px;margin-right:7px}
 
 <div class="tabs">
   <div class="tab on" data-pane="calcul">Calculer</div>
+  <div class="tab" data-pane="inventaire">Mon inventaire</div>
   <div class="tab" data-pane="histo">Historique des plans</div>
   <div class="tab" data-pane="contrats">Mes contrats</div>
 </div>
@@ -745,6 +946,34 @@ vertical-align:-2px;margin-right:7px}
   Le quota est limité sur une fenêtre longue : enchaînez sans excès.</p>
 </div>
 
+</div>
+
+<div class="pane" id="pane-inventaire">
+  <div class="card">
+    <p class="muted">Contrats realisables avec les skins que vous possedez deja.
+    Les entrees sont valorisees a ce qu'elles rapporteraient <b>revendues</b> :
+    fondre un skin, c'est renoncer a le vendre. Le prix que vous l'avez paye
+    n'entre pas dans le calcul &mdash; il est deja depense quoi que vous
+    decidiez.</p>
+    <div class="row">
+      <label>Rarete d'entree
+        <select id="inv-rarity">
+          <option value="consumer">Consumer</option>
+          <option value="industrial">Industrial</option>
+          <option value="mil-spec" selected>Mil-Spec</option>
+          <option value="restricted">Restricted</option>
+          <option value="classified">Classified</option>
+        </select>
+      </label>
+      <button class="ghost sm" id="inv-relire">Relire l'inventaire</button>
+    </div>
+    <div id="inv-bilan" class="muted">chargement&hellip;</div>
+    <div class="row" style="border-top:1px solid var(--line);padding-top:12px">
+      <button id="inv-calculer" disabled>Calculer</button>
+      <span class="muted" id="inv-cout"></span>
+    </div>
+  </div>
+  <div id="inv-sortie"></div>
 </div>
 
 <div class="pane" id="pane-histo">
@@ -1057,6 +1286,7 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     p.classList.toggle('on', p.id === 'pane-' + t.dataset.pane));
   if (t.dataset.pane === 'histo') histo();
   if (t.dataset.pane === 'contrats') contrats();
+  if (t.dataset.pane === 'inventaire') invApercu(false);
 });
 
 const dt = ts => new Date(ts * 1000).toLocaleString('fr-FR',
@@ -1192,6 +1422,139 @@ fetch('/api/status').then(x => x.json()).then(d => {
       {hour: '2-digit', minute: '2-digit'});
   if (d.currency) $('#devise').textContent = d.currency;
 }).catch(() => {});
+
+// --- Mon inventaire ---------------------------------------------------------
+
+let invSondage = null;
+
+async function invApercu(force) {
+  const r = $('#inv-rarity').value;
+  $('#inv-bilan').innerHTML = '<span class="spin"></span>lecture de l’inventaire…';
+  $('#inv-calculer').disabled = true;
+  $('#inv-cout').textContent = '';
+  try {
+    const d = await fetch('/api/inventory?rarity=' + r + (force ? '&force=1' : ''))
+      .then(x => x.json());
+    if (d.error) {
+      $('#inv-bilan').innerHTML = '<span class="neg">' + d.error + '</span>';
+      return;
+    }
+    const s = d.summary;
+    const bloque = [];
+    if (s.sans_float) bloque.push(s.sans_float + ' sans float');
+    if (s.verrouilles) bloque.push(s.verrouilles + ' verrouillés (7 jours)');
+    if (s.souvenirs) bloque.push(s.souvenirs + ' Souvenir (interdits)');
+    if (s.en_vente) bloque.push(s.en_vente + ' en vente');
+
+    let html = '<b>' + s.objets + ' objets</b>, ' + s.utilisables +
+      ' utilisables en contrat' +
+      (bloque.length ? ' <span class="muted">— ' + bloque.join(', ') + '</span>' : '');
+
+    if (d.buildable.length) {
+      html += '<div style="margin-top:8px">' + d.buildable.map(c =>
+        '<span class="tag">' + c.name + ' — ' + c.owned + ' objets</span>'
+      ).join(' ') + '</div>';
+      $('#inv-calculer').disabled = false;
+      $('#inv-cout').textContent = d.requests + ' requêtes CSFloat, soit ~' +
+        Math.ceil(d.requests / 10) + ' min';
+    } else {
+      html += '<div style="margin-top:8px" class="muted">Aucun contrat possible en ' +
+        d.rarity + ' : il faut <b>dix</b> objets de la même collection.' +
+        (d.gaps.length ? ' Le plus proche : ' + d.gaps.map(g =>
+          g.collection + ' (' + g.owned + '/10)').join(', ') : '') + '</div>';
+    }
+    $('#inv-bilan').innerHTML = html;
+  } catch (e) {
+    $('#inv-bilan').innerHTML = '<span class="neg">' + e + '</span>';
+  }
+}
+
+function invLigne(p) {
+  const signe = p.gain >= 0 ? 'pos' : 'neg';
+  const alertes = [];
+  if (p.gain <= 0) alertes.push(
+    '<div class="warn">Ces dix skins valent <b>plus vendus que fondus</b>. ' +
+    'Le contrat détruirait ' + Math.abs(p.gain).toFixed(2) + ' ' + p.currency + '.</div>');
+  if (p.decorated.length) alertes.push(
+    '<div class="warn">' + p.decorated.length + ' objet(s) portent des stickers ' +
+    "ou une breloque : le contrat les détruit, et leur valeur n’est pas comptée " +
+    'ici. — ' + p.decorated.join(', ') + '</div>');
+  if (p.listed.length) alertes.push(
+    '<div class="warn">' + p.listed.length + ' objet(s) sont actuellement ' +
+    '<b>en vente</b> sur CSFloat : il faudra retirer les annonces.</div>');
+
+  return '<div class="card">' +
+    '<div class="row" style="justify-content:space-between">' +
+      '<b>' + p.collection + ' <span class="tag">' + p.rarity + '</span></b>' +
+      '<span class="' + signe + '" style="font-size:18px">' +
+        (p.gain >= 0 ? '+' : '') + p.gain.toFixed(2) + ' ' + p.currency +
+        ' (' + (p.roi * 100).toFixed(1) + '%)</span>' +
+    '</div>' +
+    '<p class="muted">Valeur des dix entrées si vendues : ' +
+      p.opportunity_cost.toFixed(2) + ' &middot; revente nette espérée : ' +
+      p.net.toFixed(2) + ' &middot; float moyen ' + p.avg_float.toFixed(4) +
+      ' <span class="muted">(exact, aucun tirage)</span></p>' +
+    alertes.join('') +
+    '<div class="scroll"><table>' +
+      '<thead><tr><th>À fondre</th><th class="num">Float</th>' +
+      '<th class="num">Valeur si vendu</th></tr></thead><tbody>' +
+      p.inputs.map(i => '<tr><td>' + i.name + '</td><td class="num">' +
+        i.float.toFixed(4) + '</td><td class="num">' + i.value.toFixed(2) +
+        '</td></tr>').join('') +
+    '</tbody></table></div>' +
+    '<div class="scroll"><table>' +
+      '<thead><tr><th>Sortie possible</th><th class="num">Probabilité</th>' +
+      '<th class="num">Float</th><th class="num">Revente nette</th></tr></thead><tbody>' +
+      p.outcomes.map(o => '<tr><td>' + o.name + '</td><td class="num">' +
+        (o.probability * 100).toFixed(1) + '%</td><td class="num">' +
+        o.float.toFixed(4) + '</td><td class="num">' + o.net.toFixed(2) +
+        '</td></tr>').join('') +
+    '</tbody></table></div></div>';
+}
+
+async function invSuivre(id) {
+  const d = await fetch('/api/inventory-job/' + id).then(x => x.json());
+  if (d.state === 'running') {
+    banniere("Valorisation de l’inventaire… " + d.elapsed + "s");
+    return;
+  }
+  clearInterval(invSondage);
+  invSondage = null;
+  cacherBanniere();
+  $('#inv-calculer').disabled = false;
+
+  if (d.state === 'quota' || d.state === 'error') {
+    banniere(d.message, true);
+    $('#inv-sortie').innerHTML = '<div class="card neg">' + d.message + '</div>';
+    return;
+  }
+  if (!d.results.length) {
+    $('#inv-sortie').innerHTML = '<div class="card muted">' + d.message +
+      (d.gaps.length ? '<br>Le plus proche du compte : ' + d.gaps.map(g =>
+        g.collection + ' (' + g.owned + '/10)').join(', ') : '') + '</div>';
+    return;
+  }
+  // Les plus rentables d'abord : c'est la seule chose qu'on cherche.
+  const tries = d.results.slice().sort((a, b) => b.gain - a.gain);
+  $('#inv-sortie').innerHTML = '<p class="muted">' + d.message + '</p>' +
+    tries.map(invLigne).join('');
+}
+
+$('#inv-rarity').addEventListener('change', () => invApercu(false));
+$('#inv-relire').addEventListener('click', () => invApercu(true));
+$('#inv-calculer').addEventListener('click', async () => {
+  $('#inv-calculer').disabled = true;
+  $('#inv-sortie').innerHTML = '';
+  banniere("Valorisation de l’inventaire…");
+  const d = await fetch('/api/inventory', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rarity: $('#inv-rarity').value}),
+  }).then(x => x.json());
+  if (d.error) { banniere(d.error, true); $('#inv-calculer').disabled = false; return; }
+  invSondage = setInterval(() => invSuivre(d.id), 2000);
+  invSuivre(d.id);
+});
 
 $('#tous').addEventListener('change', contrats);
 $('#rafraichir').addEventListener('click', contrats);
