@@ -252,3 +252,53 @@ def test_carnet_uniquement_sticke_devient_vide():
     p = CSFloatPricer(RichSource([RichListing(600.0, 0.04, stickers=4)]))
     assert p._listings("x") == []
     assert p.price_at_float("x", 0.04) is None
+
+
+# --- Liquidite : combien de temps pour revendre ------------------------------
+
+
+class SourceAvecHistorique(RichSource):
+    def __init__(self, offres, ventes, jours):
+        super().__init__(offres)
+        self.ventes = ventes
+        self.jours = jours
+
+    def sales_history(self, name):
+        return self.ventes
+
+    def daily_sales(self, name, jours=7):
+        return self.jours[:jours]
+
+
+def test_les_stats_de_vente_donnent_le_rythme_reel():
+    """Le prix affiche suppose qu'on vend au marche ; la liquidite dit combien
+    de temps ca prend. Sans elle, un contrat annonce a +0.37 s'est solde a
+    -0.02 faute d'avoir attendu."""
+    p = CSFloatPricer(SourceAvecHistorique(
+        offres=[RichListing(1.20, 0.05)],
+        ventes=[RichListing(1.30, 0.05), RichListing(1.40, 0.04),
+                RichListing(9.00, 0.03, stickers=4)],  # stickee : ignoree
+        jours=[{"jour": "2026-09-15", "ventes": 20, "prix_moyen": 1.35},
+               {"jour": "2026-09-14", "ventes": 10, "prix_moyen": 1.30}],
+    ))
+    st = p.sales_stats("x")
+    assert st["ventes_jour"] == 15  # moyenne de 20 et 10
+    assert st["prix_median"] == pytest.approx(1.40)  # mediane des ventes NUES
+    assert st["ventes_observees"] == 2
+
+
+def test_la_mediane_des_ventes_n_entre_pas_dans_la_valorisation():
+    """Elle est souvent au-dessus du prix demande le plus bas : l'utiliser
+    rendrait le modele plus optimiste, exactement le mauvais sens."""
+    p = CSFloatPricer(SourceAvecHistorique(
+        offres=[RichListing(1.18, 0.05)],
+        ventes=[RichListing(1.31, 0.05)],
+        jours=[{"jour": "2026-09-15", "ventes": 18, "prix_moyen": 1.31}],
+    ))
+    assert p.price_at_float("x", 0.05) == pytest.approx(1.18)  # l'ask, pas 1.31
+
+
+def test_absence_d_historique_ne_casse_rien():
+    p = CSFloatPricer(SourceAvecHistorique(
+        offres=[RichListing(1.0, 0.05)], ventes=[], jours=[]))
+    assert p.sales_stats("x") is None

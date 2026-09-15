@@ -254,6 +254,25 @@ def cmd_plan(args) -> int:
 
     print(f"\nCout {r.cost:.2f} | EV nette {r.ev_net:.2f} | "
           f"profit {r.ev_profit:+.2f} ({r.roi:+.1%})")
+    lent = plan.slowest_outcome
+    if lent is not None:
+        nom, st = lent
+        v = st["ventes_jour"]
+        delai = ("quelques heures" if v >= 15 else
+                 "un a deux jours" if v >= 5 else "plusieurs jours")
+        print(
+            f"\nREVENTE : les prix ci-dessus supposent que tu vends AU MARCHE.\n"
+            f"  Sortie la plus lente : {nom}\n"
+            f"    {v} ventes par jour -- compte {delai} pour ecouler au bon prix."
+        )
+        if st.get("prix_median"):
+            print(f"    prix median reellement paye : {st['prix_median']:.2f}")
+        print(
+            "  Accepter une offre rapide au lieu d'attendre coute environ un "
+            "tiers de la valeur.\n"
+            "  C'est ce qui a transforme un contrat annonce a +0.37 en -0.02."
+        )
+
     if plan.all_outcomes_profitable:
         print(
             f"\nTOUTES LES SORTIES SONT RENTABLES : quel que soit le skin obtenu,\n"

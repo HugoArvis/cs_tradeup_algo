@@ -69,8 +69,14 @@ Factory New.
 nue. Les compter valorisait une Five-SeveN Candy Apple 582 USD contre 85 réels.
 
 **Aucune prime de bas float dans le calcul** — elle existe (+40 %) mais ce sont
-des prix demandés sans volume publié. Retenir la moins chère annonce nue du
-palier.
+des prix demandés, rien ne dit qu'ils se concluent. Retenir la moins chère
+annonce nue du palier.
+
+**Le prix affiché n'est pas ce qu'on encaisse.** Un contrat annoncé à +0,37 € a
+fini à −0,02 € : la valorisation était juste à 3 % près, mais la revente s'est
+faite 33 % sous le marché. `/history/{nom}/graph` donne les ventes par jour,
+`/history/{nom}/sales` les transactions réelles — `CSFloatPricer.sales_stats()`
+les expose pour dire combien de temps une revente prendra.
 
 **`all_outcomes_profitable` prime sur le nombre de sorties** — trois issues
 toutes rentables valent mieux qu'une issue unique au gain marginal.

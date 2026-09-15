@@ -17,6 +17,7 @@ d'attendre, pas de reessayer.
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from dataclasses import dataclass
 
 from .base import PriceSource, Quote
@@ -56,6 +57,32 @@ class Listing:
         de sortie sans rapport avec ce qu'on pourra reellement encaisser.
         """
         return not self.stickers and not self.keychains
+
+
+def _vers_listing(row: object, nom_par_defaut: str) -> Listing | None:
+    """Convertit une ligne d'API en `Listing`, ou None si inexploitable.
+
+    Partage entre les offres en vente et l'historique des ventes : les deux
+    endpoints renvoient la meme forme, et les parser differemment serait la
+    porte ouverte a une incoherence silencieuse entre prix demande et prix paye.
+    """
+    if not isinstance(row, dict):
+        return None
+    prix = row.get("price")
+    if prix is None:
+        return None
+    item = row.get("item") or {}
+    return Listing(
+        listing_id=str(row.get("id", "")),
+        market_hash_name=item.get("market_hash_name", nom_par_defaut),
+        price=float(prix) / 100.0,  # l'API repond en centimes
+        float_value=(
+            float(item["float_value"]) if item.get("float_value") is not None else None
+        ),
+        paint_seed=item.get("paint_seed"),
+        stickers=len(item.get("stickers") or ()),
+        keychains=len(item.get("keychains") or ()),
+    )
 
 
 class CSFloat(PriceSource):
@@ -133,30 +160,7 @@ class CSFloat(PriceSource):
         data = self.client.get_json(LISTINGS_URL, params)
         rows = data.get("data", []) if isinstance(data, dict) else (data or [])
 
-        out: list[Listing] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            item = row.get("item") or {}
-            raw_price = row.get("price")
-            if raw_price is None:
-                continue
-            out.append(
-                Listing(
-                    listing_id=str(row.get("id", "")),
-                    market_hash_name=item.get("market_hash_name", market_hash_name),
-                    price=float(raw_price) / 100.0,  # l'API repond en centimes
-                    float_value=(
-                        float(item["float_value"])
-                        if item.get("float_value") is not None
-                        else None
-                    ),
-                    paint_seed=item.get("paint_seed"),
-                    stickers=len(item.get("stickers") or ()),
-                    keychains=len(item.get("keychains") or ()),
-                )
-            )
-        return out
+        return [l for l in (_vers_listing(r, market_hash_name) for r in rows) if l]
 
     def account_currency(self) -> str | None:
         """Devise d'affichage du compte CSFloat.
@@ -189,6 +193,35 @@ class CSFloat(PriceSource):
         if not taux:
             raise LookupError(f"taux introuvable pour {currency}")
         return taux
+
+    def sales_history(self, market_hash_name: str) -> list[Listing]:
+        """Ventes REELLEMENT conclues, les plus recentes d'abord.
+
+        Difference capitale avec `listings()` : ce sont des transactions, pas
+        des prix demandes. Un vendeur encaisse ce qu'un acheteur a paye, pas ce
+        qu'un autre vendeur espere.
+        """
+        enc = urllib.parse.quote(market_hash_name)
+        data = self.client.get_json(f"{API_ROOT}/history/{enc}/sales")
+        rows = data if isinstance(data, list) else []
+        return [l for l in (_vers_listing(r, market_hash_name) for r in rows) if l]
+
+    def daily_sales(self, market_hash_name: str, jours: int = 7) -> list[dict]:
+        """Nombre de ventes et prix moyen, par jour.
+
+        C'est la donnee de liquidite qui manquait : elle dit combien de temps
+        une revente prendra. 20 ventes par jour se placent dans la journee,
+        3 ventes par jour demandent d'attendre -- ou de brader.
+        """
+        enc = urllib.parse.quote(market_hash_name)
+        data = self.client.get_json(f"{API_ROOT}/history/{enc}/graph")
+        rows = data if isinstance(data, list) else []
+        return [
+            {"jour": r.get("day", "")[:10],
+             "ventes": int(r.get("count", 0)),
+             "prix_moyen": float(r.get("avg_price", 0)) / 100.0}
+            for r in rows[:jours]
+        ]
 
     def cheapest_at_float(
         self, market_hash_name: str, max_float: float, limit: int = 20

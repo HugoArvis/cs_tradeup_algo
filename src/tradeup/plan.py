@@ -15,7 +15,7 @@ structurellement meilleur que Steam pour executer un trade-up.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .db import SkinDatabase
 from .ev import InputItem, TradeUpResult, evaluate
@@ -45,6 +45,7 @@ class CSFloatPricer:
         self.safety_margin = safety_margin
         self.listings_limit = listings_limit
         self._book: dict[str, list[tuple[float, float]]] = {}  # nom -> [(float, prix)]
+        self._stats: dict[str, dict | None] = {}
 
     def _listings(self, name: str) -> list[tuple[float, float]]:
         """Carnet nettoye, utilisable pour valoriser une sortie de trade-up.
@@ -98,8 +99,8 @@ class CSFloatPricer:
         existe (une Factory New a 0.005 s'affiche 40 % au-dessus d'une a
         0.070). Trois raisons :
 
-        1. Ce sont des prix DEMANDES. CSFloat ne publie aucun volume, donc rien
-           ne dit qu'ils se concluent -- ni en combien de temps.
+        1. Ce sont des prix DEMANDES, et rien ne dit qu'une annonce a prime se
+           conclut -- ni en combien de temps.
         2. Cette prime concerne une poignee d'annonces. En la prenant pour
            reference, le modele a value une Five-SeveN Candy Apple 582 USD,
            puis 181, puis 121, la ou les exemplaires nus se vendent 85.
@@ -134,7 +135,41 @@ class CSFloatPricer:
         return self._lowest(skin.market_hash_name(wear, stattrak))
 
     def volume(self, skin, wear, stattrak=False) -> int | None:
-        return None  # l'endpoint listings ne donne pas de volume de ventes
+        stats = self.sales_stats(skin.market_hash_name(wear, stattrak))
+        return stats["ventes_jour"] if stats else None
+
+    def sales_stats(self, name: str) -> dict | None:
+        """Liquidite reelle : ventes par jour et prix median effectivement paye.
+
+        `/history/{nom}/graph` donne le nombre de ventes par jour, et
+        `/history/{nom}/sales` les transactions conclues. C'est ce qui dit
+        combien de temps une revente prendra -- l'information qui manquait quand
+        un contrat annonce a +0.37 s'est solde par -0.02, faute d'avoir vendu au
+        prix du marche.
+
+        Le prix median des ventes n'entre PAS dans la valorisation : il est
+        souvent superieur au prix demande le plus bas, donc l'utiliser rendrait
+        le modele plus optimiste. Il sert a informer, pas a calculer.
+        """
+        if name in self._stats:
+            return self._stats[name]
+        try:
+            jours = self.source.daily_sales(name, jours=7)
+            ventes = [v.price for v in self.source.sales_history(name) if v.plain]
+        except Exception:  # noqa: BLE001 - la liquidite est un complement
+            self._stats[name] = None
+            return None
+
+        if not jours:
+            self._stats[name] = None
+            return None
+        recents = [j["ventes"] for j in jours]
+        self._stats[name] = {
+            "ventes_jour": round(sum(recents) / len(recents)),
+            "prix_median": (sorted(ventes)[len(ventes) // 2] if ventes else None),
+            "ventes_observees": len(ventes),
+        }
+        return self._stats[name]
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +191,21 @@ class Plan:
         return self.downgrade_net - self.result.cost
 
     exit_value: float | None = None  # produit net d'une revente des entrees
+    liquidity: dict = field(default_factory=dict)  # nom de sortie -> stats de vente
+
+    @property
+    def slowest_outcome(self) -> tuple[str, dict] | None:
+        """La sortie la plus lente a revendre, celle qui dicte votre delai.
+
+        Le prix affiche suppose qu'on vend AU MARCHE. Sur un skin qui s'echange
+        trois fois par jour, y parvenir demande de patienter ; brader pour aller
+        vite coute environ un tiers de la valeur -- mesure sur un contrat reel
+        annonce a +0.37 et solde a -0.02.
+        """
+        connus = {n: s for n, s in self.liquidity.items() if s}
+        if not connus:
+            return None
+        return min(connus.items(), key=lambda kv: kv[1].get("ventes_jour", 0))
 
     # --- Ce qui compte vraiment : le pire cas couvre-t-il la mise ? ---
 
@@ -318,6 +368,9 @@ def build_plan(
                 listings_examined=examinees,
                 downgrade_net=_net_si_palier_rate(result, pricer),
                 exit_value=_valeur_de_revente(selection, pricer, sell_fee),
+                liquidity={
+                    o.name: pricer.sales_stats(o.name) for o in result.outcomes
+                },
             )
 
     return meilleur
