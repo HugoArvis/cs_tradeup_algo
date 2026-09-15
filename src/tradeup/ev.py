@@ -209,8 +209,15 @@ def evaluate(
     stattrak: bool = False,
     treat_missing_as_zero: bool = True,
     cliff_distance: float = float("inf"),
+    avg_override: float | None = None,
 ) -> TradeUpResult:
-    """Evalue un contrat a partir de 10 entrees concretes."""
+    """Evalue un contrat a partir de 10 entrees concretes.
+
+    `avg_override` impose la moyenne normalisee au lieu de la deduire des
+    entrees. Les floats d'entree achetes au palier sont des TIRAGES : pour
+    integrer sur cet alea (`floatrisk`), il faut pouvoir evaluer le MEME panier
+    -- meme cout, memes objets -- a une moyenne qui n'est pas celle visee.
+    """
     if len(inputs) != TRADEUP_INPUT_COUNT:
         raise ValueError(
             f"Un contrat exige {TRADEUP_INPUT_COUNT} entrees, {len(inputs)} fournies"
@@ -227,6 +234,10 @@ def evaluate(
     # Le float de sortie derive de la moyenne NORMALISEE, pas des floats
     # affiches : chaque entree compte pour sa position dans son propre range.
     avg = average_normalized([(item.skin, item.float_value) for item in inputs])
+    if avg_override is not None:
+        if not 0.0 <= avg_override <= 1.0:
+            raise ValueError(f"Moyenne imposee hors [0, 1] : {avg_override}")
+        avg = avg_override
     avg_affiche = sum(i.float_value for i in inputs) / len(inputs)
     cost = sum(item.unit_cost for item in inputs)
 

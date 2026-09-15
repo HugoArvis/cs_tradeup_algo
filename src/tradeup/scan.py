@@ -75,6 +75,7 @@ def scan(
     collection_filter: Iterable[str] | None = None,
     float_percentile: float = 0.15,
     float_safety: float = 0.02,
+    float_model: str = "fixed",
     max_unit_cost: float | None = None,
     limit: int | None = 20,
     progress: Callable[[int, int], None] | None = None,
@@ -107,6 +108,7 @@ def scan(
             prices,
             float_percentile=float_percentile,
             float_safety=float_safety,
+            float_model=float_model,
             max_unit_cost=max_unit_cost,
         )
         if result is None:

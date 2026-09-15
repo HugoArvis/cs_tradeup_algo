@@ -103,6 +103,23 @@ les expose pour dire combien de temps une revente prendra.
 **`all_outcomes_profitable` prime sur le nombre de sorties** — trois issues
 toutes rentables valent mieux qu'une issue unique au gain marginal.
 
+**Le float d'entrée est un tirage, pas une valeur choisie.** Sur Steam on achète
+un palier, pas un float. `--float-model random` (module `floatrisk`) chiffre ce
+risque au lieu de l'éviter par la marge forfaitaire `--float-safety` : float
+normalisé uniforme sur le palier, moyenne des 10 approchée par une normale
+**corrigée au 4ᵉ ordre** (Edgeworth — dix tirages ne font pas une gaussienne :
+l'erreur passe de 1,9 à 0,3 point sur les probabilités de palier, mesuré contre
+Monte-Carlo), puis EV pondérée par segment et aplatie dans la distribution des
+sorties, si bien que tout l'aval en profite sans le savoir.
+
+Deux conséquences qu'il ne faut pas défaire :
+- ce mode impose `--float-pct 0.5`. L'espérance d'un tirage uniforme tombe au
+  milieu du palier ; viser 0,15 sans pouvoir filtrer les floats n'est pas une
+  hypothèse prudente, c'est une moyenne fausse (μ décalé de 0,12 en v1) ;
+- l'EV intégrée n'est plus constante par morceaux, donc l'optimiseur teste
+  plusieurs reculs (0 à 3 σ) sous chaque frontière. La marge de sécurité devient
+  une décision prise contrat par contrat, pas un réglage subi.
+
 **Une dérive se lit du côté du portefeuille, pas du prix.** Une entrée qui
 renchérit et une sortie qui se déprécie sont toutes deux défavorables, avec des
 signes opposés en variation brute. `refresh.Drift.impact` porte ce signe ;

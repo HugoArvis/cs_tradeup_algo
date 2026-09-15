@@ -22,6 +22,13 @@ from itertools import combinations
 
 from .db import SkinDatabase
 from .ev import InputItem, PriceLookup, TradeUpResult, evaluate
+from .floatrisk import (
+    average_mu,
+    average_sigma,
+    evaluate_stochastic,
+    excess_kurtosis,
+    flatten,
+)
 from .models import Collection, Rarity, Skin, Wear
 from .wear import TRADEUP_INPUT_COUNT, wear_breakpoints
 
@@ -320,8 +327,14 @@ def optimize_recipe(
     max_unit_cost: float | None = None,
     stattrak: bool = False,
     float_safety: float = 0.02,
+    float_model: str = "fixed",
 ) -> TradeUpResult | None:
     """Meilleur contrat realisable pour une recette donnee.
+
+    `float_model="random"` traite le float d'entree pour ce qu'il est sur un
+    achat au palier : un TIRAGE. L'EV renvoyee integre alors la probabilite de
+    rater le palier vise, au lieu de s'en proteger par une marge forfaitaire.
+    Ce mode impose `float_percentile=0.5` et `float_safety=0` -- voir plus bas.
 
     Balaye les paliers d'EV (constants par morceaux) et, sur chacun, cherche le
     lot d'entrees le moins cher qui atteint la moyenne de float requise.
@@ -343,7 +356,17 @@ def optimize_recipe(
 
     Mettre 0 n'a de sens que si les floats d'entree sont verifies un par un
     (via CSFloat), auquel cas le tirage n'est plus aleatoire.
+
+    En mode `random`, cette marge disparait : le risque de basculement n'est
+    plus evite, il est CHIFFRE et deduit de l'EV. Et le percentile passe a 0.5,
+    parce que l'esperance d'un tirage uniforme tombe au milieu du palier --
+    viser 0.15 sans pouvoir filtrer les floats n'est pas une hypothese prudente,
+    c'est une moyenne fausse.
     """
+    if float_model == "random":
+        float_percentile = 0.5
+        float_safety = 0.0
+
     collections = [db.collection(cid) for cid, _ in recipe.counts]
     outcomes_map = db.outcomes_map(collections, recipe.rarity)
     all_outcomes = [s for skins in outcomes_map.values() for s in skins]
@@ -366,35 +389,100 @@ def optimize_recipe(
     best: TradeUpResult | None = None
     breakpoints = wear_breakpoints(all_outcomes)
 
-    for i, hi in enumerate(breakpoints[1:], 1):
-        # Sur le palier qui finit en `hi`, la moyenne la plus haute est la moins
-        # chere -- mais on garde `float_safety` de marge sous la frontiere.
-        lo = breakpoints[i - 1]
-        target_avg = hi - max(float_safety, 1e-7)
-        if target_avg < lo:
-            continue  # palier trop etroit pour y tenir en securite
-        budget = target_avg * TRADEUP_INPUT_COUNT
-
-        selection = _select_across_collections(recipe, options_by_collection, budget)
+    def tenter(target_avg: float, hi: float) -> TradeUpResult | None:
+        """Meilleur panier atteignant cette moyenne, evalue selon le modele."""
+        selection = _select_across_collections(
+            recipe, options_by_collection, target_avg * TRADEUP_INPUT_COUNT
+        )
         if selection is None:
-            continue
-
+            return None
         items = [
             InputItem(skin=o.skin, float_value=o.float_value, unit_cost=o.unit_cost)
             for o in selection
         ]
         achieved = sum(o.normalized for o in selection) / TRADEUP_INPUT_COUNT
-        result = evaluate(
+        if float_model == "random":
+            return flatten(
+                evaluate_stochastic(
+                    items,
+                    outcomes_map,
+                    prices,
+                    sigma=average_sigma(selection),
+                    mu=average_mu(selection),
+                    kurtosis=excess_kurtosis(selection),
+                    stattrak=stattrak,
+                )
+            )
+        return evaluate(
             items,
             outcomes_map,
             prices,
             stattrak=stattrak,
             cliff_distance=hi - achieved,
         )
-        if best is None or result.ev_profit > best.ev_profit:
-            best = result
+
+    for i, hi in enumerate(breakpoints[1:], 1):
+        lo = breakpoints[i - 1]
+        for target_avg in _targets_in_segment(
+            lo, hi, float_model, float_safety, recipe, options_by_collection
+        ):
+            result = tenter(target_avg, hi)
+            if result is not None and (best is None or result.ev_profit > best.ev_profit):
+                best = result
 
     return best
+
+
+#: Marges testees sous une frontiere, en ecarts-types de la moyenne d'entree.
+#: 0 = se coller a la frontiere (le moins cher, ~50 % de chances de basculer),
+#: 3 = s'en eloigner franchement (~0.1 % de risque, mais des entrees plus cheres).
+_SAFETY_STEPS = (0.0, 1.0, 2.0, 3.0)
+
+
+def _targets_in_segment(
+    lo: float,
+    hi: float,
+    float_model: str,
+    float_safety: float,
+    recipe: Recipe,
+    options_by_collection: dict[str, list[InputOption]],
+) -> list[float]:
+    """Moyennes d'entree a essayer sur le segment `[lo, hi)`.
+
+    En mode `fixed`, l'EV est constante par morceaux : un seul point suffit, la
+    moyenne la plus haute admissible, qui donne la meme sortie pour des entrees
+    moins cheres.
+
+    En mode `random`, ce n'est plus vrai. L'EV integree varie CONTINUMENT avec
+    la moyenne visee : se coller sous la frontiere est le moins cher mais laisse
+    une chance sur deux de basculer au palier suivant. L'optimum est quelque
+    part a l'interieur du segment, et un point unique ne peut pas le trouver.
+
+    On essaie donc plusieurs reculs, exprimes en ecarts-types du tirage. La
+    marge de securite cesse ainsi d'etre un reglage subi : l'optimiseur choisit
+    celle qui maximise l'EV, contrat par contrat.
+    """
+    haut = hi - 1e-7
+    if float_model != "random":
+        cible = hi - max(float_safety, 1e-7)
+        return [cible] if cible >= lo else []
+
+    # Sonde : le sigma depend des paliers achetes, qu'on ne connait qu'apres
+    # avoir selectionne. Une selection collee a la frontiere suffit a l'estimer
+    # -- il varie peu d'un recul a l'autre.
+    if haut < lo:
+        return []
+    sonde = _select_across_collections(
+        recipe, options_by_collection, haut * TRADEUP_INPUT_COUNT
+    )
+    if sonde is None:
+        return []
+    sigma = average_sigma(sonde)
+    if sigma <= 0:
+        return [haut]  # floats exacts : aucun recul n'a de sens
+
+    cibles = [haut - k * sigma for k in _SAFETY_STEPS]
+    return [c for c in cibles if lo <= c <= haut]
 
 
 def _select_across_collections(

@@ -486,6 +486,7 @@ def cmd_scan(args) -> int:
         collection_filter=[c.id for c in collections] if args.collections else None,
         float_percentile=args.float_pct,
         float_safety=args.float_safety,
+        float_model=args.float_model,
         max_unit_cost=args.max_unit_cost,
         limit=args.limit,
         progress=_progress("recettes"),
@@ -715,6 +716,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="decote de securite sur la revente (defaut 5 %%)")
     s.add_argument("--float-pct", type=float, default=0.15,
                    help="position du float sourcable dans son palier")
+    s.add_argument("--float-model", default="fixed", choices=("fixed", "random"),
+                   help="random : le float d'entree est un TIRAGE, son risque "
+                        "est chiffre dans l'EV au lieu d'etre evite par une "
+                        "marge (impose --float-pct 0.5 et --float-safety 0)")
     s.add_argument("--float-safety", type=float, default=0.02,
                    help="marge de moyenne interdite sous une frontiere d'usure "
                         "(0 seulement si les floats sont verifies via CSFloat)")
