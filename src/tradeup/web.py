@@ -309,6 +309,12 @@ class App:
             "net": self.conv(r.ev_net),
             "gain": self.conv(plan.gain),
             "roi": round(r.roi, 4),
+            # Le gain seul est trompeur : un +2 une fois sur trois vaut moins
+            # qu'un +0.50 a tous les coups. Le classement a besoin des deux.
+            "win_probability": round(r.profit_probability, 4),
+            "always_profitable": plan.always_profitable,
+            "outcomes_count": r.distinct_outcomes,
+            "stdev": self.conv(r.stdev),
             "avg_float": round(r.avg_input_float, 5),
             "decorated": [i.market_hash_name for i in plan.decorated_inputs],
             "listed": [i.market_hash_name for i in plan.listed_inputs],
@@ -456,6 +462,8 @@ class App:
                 "outcomes": len(payload["outcomes"]),
                 "worst_profit": payload.get("worst_profit"),
                 "all_profitable": payload.get("all_profitable", False),
+                "win_probability": payload.get("win_probability", 0.0),
+                "stdev": payload.get("stdev", 0.0),
             })
 
         if batch.state != "stopped":
@@ -476,7 +484,7 @@ class App:
             "elapsed": round(time.time() - batch.started),
             "resume_in": max(0, round(batch.resume_at - time.time())),
             "currency": self.currency,
-            # Les plus rentables d'abord : c'est la seule chose qu'on cherche.
+            # Tri par defaut au profit ; l'interface reclasse sans recalculer.
             "results": sorted(batch.done, key=lambda d: -d["profit"])[:40],
             "failed": batch.failed[-10:],
         }
@@ -509,6 +517,9 @@ class App:
             "net": self.conv(r.ev_net),
             "profit": self.conv(r.ev_profit),
             "roi": round(r.roi, 4),
+            "win_probability": round(r.profit_probability, 4),
+            "outcomes_count": r.distinct_outcomes,
+            "stdev": self.conv(r.stdev),
             "avg_float": round(r.avg_input_float, 5),
             "listings_examined": p.listings_examined,
             "float_slack": round(p.float_slack, 5),
@@ -932,6 +943,14 @@ vertical-align:-2px;margin-right:7px}
   <p class="muted" id="compte">…</p>
   <div class="row" style="border-top:1px solid var(--line);padding-top:12px">
     <button class="ghost" id="balayer">Tout calculer pour cette rareté</button>
+    <label>Classer par
+      <select id="bat-rank">
+        <option value="risk_adjusted" selected>gain régulier (défaut)</option>
+        <option value="safety">probabilité de gagner</option>
+        <option value="ev">gain le plus élevé</option>
+        <option value="roi">rendement</option>
+      </select>
+    </label>
     <span class="muted" id="cout-balayage"></span>
   </div>
   <div id="balayage"></div>
@@ -963,6 +982,14 @@ vertical-align:-2px;margin-right:7px}
           <option value="mil-spec" selected>Mil-Spec</option>
           <option value="restricted">Restricted</option>
           <option value="classified">Classified</option>
+        </select>
+      </label>
+      <label>Classer par
+        <select id="inv-rank">
+          <option value="risk_adjusted" selected>gain régulier (défaut)</option>
+          <option value="safety">probabilité de gagner</option>
+          <option value="ev">gain le plus élevé</option>
+          <option value="roi">rendement</option>
         </select>
       </label>
       <button class="ghost sm" id="inv-relire">Relire l'inventaire</button>
@@ -1230,6 +1257,10 @@ $('#balayer').addEventListener('click', async () => {
   suivreBatch(r.batch);
 });
 
+// Le dernier etat recu, pour reclasser sans refaire d'appel : un balayage
+// termine n'est plus sonde, et changer de critere ne doit rien recouter.
+let dernierBatch = null;
+
 async function suivreBatch(id) {
   const b = await fetch('/api/batch/' + id).then(x => x.json());
   if (b.error) { clearInterval(sondageBatch); return; }
@@ -1240,7 +1271,18 @@ async function suivreBatch(id) {
   else banniere(`Balayage ${pct}% — ${b.remaining} collections restantes` +
     (b.state === 'paused' ? ` — quota épuisé, reprise dans ${b.resume_in}s` : ''));
 
-  const lignes = b.results.map(x => `<tr>
+  dernierBatch = b;
+  dessinerBatch(b);
+}
+
+function dessinerBatch(b) {
+  const pct = Math.round(b.progress * 100);
+  const fini = b.state === 'finished' || b.state === 'stopped';
+
+  const classes = trier(b.results, $('#bat-rank').value,
+    x => ({gain: x.profit, roi: x.roi, win: x.win_probability || 0,
+           stdev: x.stdev || 0.01}));
+  const lignes = classes.map(x => `<tr>
     <td>${x.collection}${x.rarity ? ` <span class="tag">${x.rarity}</span>` : ''}</td>
     <td class="num">${x.outcomes}${x.all_profitable
       ? ' <span class="tag" style="background:#0f7a3d;color:#fff">toutes OK</span>' : ''}</td>
@@ -1248,6 +1290,7 @@ async function suivreBatch(id) {
     <td class="num ${x.profit >= 0 ? 'pos' : 'neg'}">${
       x.profit >= 0 ? '+' : ''}${x.profit.toFixed(2)}</td>
     <td class="num ${x.profit >= 0 ? 'pos' : 'neg'}">${(x.roi * 100).toFixed(1)}%</td>
+    <td class="num">${((x.win_probability || 0) * 100).toFixed(0)}%</td>
     <td><button class="ghost sm" data-voir="${x.plan_id}">Voir</button>
         <button class="sm" data-follow="${x.plan_id}">Suivre</button></td></tr>`).join('');
 
@@ -1263,9 +1306,12 @@ async function suivreBatch(id) {
     ${lignes ? `<div class="scroll"><table>
       <thead><tr><th>Collection</th><th class="num">Sorties</th>
         <th class="num">Coût</th><th class="num">Profit</th>
-        <th class="num">Rendement</th><th></th></tr></thead>
+        <th class="num">Rendement</th><th class="num">P(gain)</th>
+        <th></th></tr></thead>
       <tbody>${lignes}</tbody></table></div>
-      <p class="muted">Classé par profit décroissant. Montants en ${b.currency}.</p>`
+      <p class="muted">Classé par ${$('#bat-rank').selectedOptions[0].textContent}.
+      Montants en ${b.currency}. <b>P(gain)</b> est la probabilité que le tirage
+      rapporte plus que les entrées n’ont coûté.</p>`
       : '<p class="muted">Aucun résultat pour l\u2019instant.</p>'}
   </div>`;
 }
@@ -1288,6 +1334,32 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   if (t.dataset.pane === 'contrats') contrats();
   if (t.dataset.pane === 'inventaire') invApercu(false);
 });
+
+// --- Classement partage -----------------------------------------------------
+// Les memes criteres que `scan --rank`, appliques cote client : reclasser une
+// liste deja calculee ne doit rien recouter en requetes CSFloat.
+//
+// Chaque critere renvoie un tableau compare terme a terme, ce qui exprime
+// "probabilite d'abord, gain ensuite" sans nombre magique. Tous se departagent
+// par le gain : a egalite, mieux vaut gagner plus.
+
+const CRITERES = {
+  risk_adjusted: p => [p.gain / Math.max(p.stdev || 0.01, 0.01), p.gain],
+  ev: p => [p.gain, p.win],
+  roi: p => [p.roi, p.gain],
+  safety: p => [p.win, p.gain],
+};
+
+function trier(liste, critere, lire) {
+  const cle = CRITERES[critere] || CRITERES.risk_adjusted;
+  return liste.slice().sort((a, b) => {
+    const x = cle(lire(a)), y = cle(lire(b));
+    for (let i = 0; i < x.length; i++) {
+      if (y[i] !== x[i]) return y[i] - x[i];
+    }
+    return 0;
+  });
+}
 
 const dt = ts => new Date(ts * 1000).toLocaleString('fr-FR',
   {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
@@ -1494,6 +1566,12 @@ function invLigne(p) {
       p.opportunity_cost.toFixed(2) + ' &middot; revente nette espérée : ' +
       p.net.toFixed(2) + ' &middot; float moyen ' + p.avg_float.toFixed(4) +
       ' <span class="muted">(exact, aucun tirage)</span></p>' +
+    // Le gain seul ne dit pas a quelle frequence on l'obtient.
+    '<p class="muted"><b>' + Math.round(p.win_probability * 100) +
+      '%</b> de chances d’y gagner &middot; ' + p.outcomes_count +
+      ' sorties possibles' + (p.always_profitable
+        ? ' &middot; <span class="pos"><b>toutes rentables</b> : le tirage ne ' +
+          'peut pas vous faire perdre</span>' : '') + '</p>' +
     alertes.join('') +
     '<div class="scroll"><table>' +
       '<thead><tr><th>À fondre</th><th class="num">Float</th>' +
@@ -1534,12 +1612,27 @@ async function invSuivre(id) {
         g.collection + ' (' + g.owned + '/10)').join(', ') : '') + '</div>';
     return;
   }
-  // Les plus rentables d'abord : c'est la seule chose qu'on cherche.
-  const tries = d.results.slice().sort((a, b) => b.gain - a.gain);
+  invDernier = d;
+  invDessiner();
+}
+
+// Reclasser ne relance aucun calcul : les contrats sont deja connus, seul
+// leur ordre change.
+let invDernier = null;
+
+function invDessiner() {
+  const d = invDernier;
+  if (!d || !d.results.length) return;
+  const tries = trier(d.results, $('#inv-rank').value,
+    p => ({gain: p.gain, roi: p.roi, win: p.win_probability, stdev: p.stdev}));
   $('#inv-sortie').innerHTML = '<p class="muted">' + d.message + '</p>' +
     tries.map(invLigne).join('');
 }
 
+$('#inv-rank').addEventListener('change', invDessiner);
+$('#bat-rank').addEventListener('change', () => {
+  if (dernierBatch) dessinerBatch(dernierBatch);
+});
 $('#inv-rarity').addEventListener('change', () => invApercu(false));
 $('#inv-relire').addEventListener('click', () => invApercu(true));
 $('#inv-calculer').addEventListener('click', async () => {

@@ -116,7 +116,13 @@ faite 33 % sous le marché. `/history/{nom}/graph` donne les ventes par jour,
 les expose pour dire combien de temps une revente prendra.
 
 **`all_outcomes_profitable` prime sur le nombre de sorties** — trois issues
-toutes rentables valent mieux qu'une issue unique au gain marginal.
+toutes rentables valent mieux qu'une issue unique au gain marginal. D'où le
+classement : `scoring.sort_key` renvoie un **tuple** (probabilité puis gain pour
+`safety`), là où `score()` encodait ce départage en `proba × 1000 + profit` —
+exact sur les montants du projet, faux au-delà de 1000. Les quatre critères sont
+partagés par `scan --rank`, `inventory --rank` et les deux listes de
+l'application web, qui reclassent **côté client** : réordonner des contrats déjà
+calculés ne doit rien recoûter en quota.
 
 **Un skin possédé coûte ce qu'il vaut à la revente, pas ce qu'on l'a payé.** Le
 prix d'achat est irrécupérable et ne doit peser sur aucune décision ; le compter

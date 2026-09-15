@@ -92,7 +92,9 @@ def score(result: TradeUpResult, ranking: Ranking = Ranking.RISK_ADJUSTED) -> fl
     if ranking is Ranking.ROI:
         return result.roi
     if ranking is Ranking.SAFETY:
-        # A probabilite egale, on departage par le profit espere.
+        # A probabilite egale, on departage par le profit espere. Le facteur
+        # 1000 suppose que le profit ne depasse jamais 1000 : vrai sur les
+        # montants du projet, mais c'est `sort_key` qui garantit l'ordre.
         return result.profit_probability * 1000 + result.ev_profit
     # RISK_ADJUSTED : un contrat sans variance (impossible en pratique) ne doit
     # pas exploser le classement, d'ou le plancher sur l'ecart-type.
@@ -131,10 +133,34 @@ class Candidate:
         )
 
 
+def sort_key(result: TradeUpResult, ranking: Ranking) -> tuple:
+    """Cle de tri exacte, decroissante (a utiliser avec `reverse=True`).
+
+    Un scalaire ne peut pas exprimer "probabilite d'abord, profit ensuite" sans
+    supposer une borne sur le profit. Un tuple le fait sans nombre magique, et
+    departage toujours dans le bon ordre.
+
+    Tous les criteres se departagent en dernier ressort par le profit : a
+    egalite sur le critere demande, mieux vaut gagner plus.
+    """
+    r = result
+    if ranking is Ranking.SAFETY:
+        # La regle du domaine : trois issues toutes rentables valent mieux
+        # qu'une issue unique au gain marginal.
+        return (r.profit_probability, r.ev_profit)
+    if ranking is Ranking.ROI:
+        return (r.roi, r.ev_profit)
+    if ranking is Ranking.EV:
+        return (r.ev_profit, r.profit_probability)
+    return (score(r, Ranking.RISK_ADJUSTED), r.ev_profit)
+
+
 def rank(
     candidates: list[Candidate], ranking: Ranking = Ranking.RISK_ADJUSTED, limit: int | None = None
 ) -> list[Candidate]:
-    ordered = sorted(candidates, key=lambda c: score(c.result, ranking), reverse=True)
+    ordered = sorted(
+        candidates, key=lambda c: sort_key(c.result, ranking), reverse=True
+    )
     return ordered[:limit] if limit else ordered
 
 

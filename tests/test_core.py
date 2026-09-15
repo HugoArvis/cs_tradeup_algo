@@ -333,3 +333,50 @@ def test_normalisation_aux_bornes_et_range_decale():
 def test_moyenne_normalisee_refuse_une_entree_vide():
     with pytest.raises(ValueError, match="Aucune entree"):
         average_normalized([])
+
+
+# --- Cles de classement ------------------------------------------------------
+
+
+def _resultat(profit_probability, ev_profit, roi=0.1, stdev=1.0):
+    """Faux resultat : seules les grandeurs du classement comptent ici."""
+
+    class Faux:
+        pass
+
+    r = Faux()
+    r.profit_probability = profit_probability
+    r.ev_profit = ev_profit
+    r.roi = roi
+    r.stdev = stdev
+    return r
+
+
+def test_le_classement_par_securite_place_la_probabilite_dabord():
+    """Trois issues toutes rentables valent mieux qu'une issue unique au gain
+    marginal : c'est une regle du domaine, pas une preference d'affichage."""
+    from tradeup.scoring import Ranking, sort_key
+
+    sur = _resultat(1.0, 0.50)
+    loterie = _resultat(0.33, 2.00)
+    assert sort_key(sur, Ranking.SAFETY) > sort_key(loterie, Ranking.SAFETY)
+    assert sort_key(loterie, Ranking.EV) > sort_key(sur, Ranking.EV)
+
+
+def test_le_departage_se_fait_sur_le_profit():
+    from tradeup.scoring import Ranking, sort_key
+
+    a = _resultat(0.5, 3.0)
+    b = _resultat(0.5, 1.0)
+    assert sort_key(a, Ranking.SAFETY) > sort_key(b, Ranking.SAFETY)
+
+
+def test_le_classement_par_securite_ne_depend_pas_dun_nombre_magique():
+    """`score()` encode SAFETY comme proba*1000 + profit : au-dela de 1000 de
+    profit, l'ordre s'inverse. `sort_key` ne peut pas avoir ce defaut."""
+    from tradeup.scoring import Ranking, score, sort_key
+
+    sur = _resultat(1.0, 10.0)
+    enorme = _resultat(0.10, 5000.0)
+    assert score(enorme, Ranking.SAFETY) > score(sur, Ranking.SAFETY)  # le defaut
+    assert sort_key(sur, Ranking.SAFETY) > sort_key(enorme, Ranking.SAFETY)

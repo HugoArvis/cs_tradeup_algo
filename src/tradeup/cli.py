@@ -630,6 +630,7 @@ def cmd_inventory(args) -> int:
         stattrak=args.stattrak,
         limit=args.limit,
         include_losing=args.show_losing,
+        ranking=Ranking(args.rank),
     )
 
     if not plans:
@@ -652,7 +653,7 @@ def cmd_inventory(args) -> int:
         cache2.close()
         return 0
 
-    print(f"\n{len(plans)} contrat(s) realisable(s) -- montants en "
+    print(f"\n{len(plans)} contrat(s) realisable(s), classes par {args.rank} -- montants en "
           f"{args.currency}.")
     print(
         "Les entrees sont valorisees a ce qu'elles rapporteraient REVENDUES : "
@@ -911,6 +912,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--stattrak", action="store_true")
     s.add_argument("--limit", type=int, default=10)
     s.add_argument("--detail", action="store_true")
+    s.add_argument("--rank", default=Ranking.RISK_ADJUSTED.value,
+                   choices=[r.value for r in Ranking],
+                   help="critere de classement : risk_adjusted (defaut) combine "
+                        "gain et regularite, safety classe par probabilite de "
+                        "gagner, ev par gain brut, roi par rendement")
     s.add_argument("--show-losing", action="store_true",
                    help="montrer aussi les contrats qui detruisent de la valeur")
     s.add_argument("--offline", action="store_true", help="n'utiliser que le cache")

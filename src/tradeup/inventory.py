@@ -40,6 +40,7 @@ from .db import SkinDatabase
 from .ev import InputItem, PriceLookup, TradeUpResult, evaluate
 from .generator import InputOption, cheapest_unique_selection
 from .models import Collection, Rarity, Skin
+from .scoring import Ranking, sort_key
 from .wear import TRADEUP_INPUT_COUNT, wear_breakpoints, wear_of
 
 log = logging.getLogger(__name__)
@@ -115,6 +116,18 @@ class InventoryTradeUp:
         return self.result.ev_profit
 
     @property
+    def always_profitable(self) -> bool:
+        """Toutes les sorties rapportent-elles plus que les entrees ?
+
+        Le tirage ne peut alors pas faire perdre. C'est la propriete qui prime
+        sur le nombre de sorties : trois issues toutes rentables valent mieux
+        qu'une issue unique au gain marginal.
+        """
+        return bool(self.result.outcomes) and all(
+            o.net_value >= self.result.cost for o in self.result.outcomes
+        )
+
+    @property
     def decorated_inputs(self) -> tuple[OwnedItem, ...]:
         return tuple(i for i in self.items if i.decorated)
 
@@ -157,6 +170,11 @@ class InventoryTradeUp:
             f"  10 entrees possedees, valeur de revente {self.opportunity_cost:.2f}",
             f"  EV nette de la sortie {r.ev_net:.2f}  |  "
             f"gain {self.gain:+.2f} ({r.roi:+.1%})",
+            # Le gain seul ne dit pas a quelle frequence on l'obtient : un +2
+            # une fois sur trois vaut moins qu'un +0.50 a tous les coups.
+            f"  {r.profit_probability:.0%} de chances d'y gagner"
+            f"  |  {r.distinct_outcomes} sorties possibles"
+            + ("  |  TOUTES RENTABLES" if self.always_profitable else ""),
             f"  float moyen d'entree {r.avg_input_float:.4f} "
             f"(exact : aucun tirage)",
         ]
@@ -338,12 +356,18 @@ def best_tradeups(
     stattrak: bool = False,
     limit: int | None = 10,
     include_losing: bool = False,
+    ranking: Ranking = Ranking.RISK_ADJUSTED,
 ) -> list[InventoryTradeUp]:
     """Meilleurs contrats realisables avec ce qu'on possede, par collection.
 
     Mono-collection uniquement : melanger deux collections depuis un inventaire
     suppose posseder assez d'objets dans chacune, ce qui est rare, et multiplie
     les combinaisons sans rien apporter tant que le cas simple n'est pas couvert.
+
+    `ranking` reprend les criteres du scan. Le gain brut seul est trompeur ici :
+    un contrat a +2 qui ne gagne qu'une fois sur trois vaut moins qu'un contrat
+    a +0.50 qui gagne a tous les coups, et c'est la regle du domaine -- trois
+    issues toutes rentables valent mieux qu'une issue unique au gain marginal.
     """
     # Regrouper AVANT de valoriser. Un contrat exige dix objets de la meme
     # collection : les collections qui n'en ont pas assez ne produiront rien,
@@ -373,7 +397,7 @@ def best_tradeups(
         if meilleur is not None and (include_losing or meilleur.gain > 0):
             plans.append(meilleur)
 
-    plans.sort(key=lambda p: p.gain, reverse=True)
+    plans.sort(key=lambda p: sort_key(p.result, ranking), reverse=True)
     return plans[:limit] if limit else plans
 
 

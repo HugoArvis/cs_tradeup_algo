@@ -313,3 +313,33 @@ def test_linventaire_nest_pas_relu_a_chaque_clic(app, monkeypatch):
     assert len(appels) == 1
     app.inventaire(force=True)  # le bouton "Relire" doit, lui, retaper l'API
     assert len(appels) == 2
+
+
+def test_le_payload_dinventaire_porte_de_quoi_classer(app, monkeypatch):
+    """L'interface reclasse cote client : elle a besoin des grandeurs, pas
+    seulement du gain."""
+    from tradeup.pricing.repository import StaticPricer
+
+    prix = {}
+    for nom in ("Arme A", "Sortie A"):
+        for usure in ("Factory New", "Minimal Wear", "Field-Tested",
+                      "Well-Worn", "Battle-Scarred"):
+            prix[f"{nom} ({usure})"] = 1.0 if nom == "Arme A" else 40.0
+
+    monkeypatch.setattr(app, "inventaire", lambda **k: inventaire_de_test())
+    monkeypatch.setattr(app, "load_currency", lambda: None)
+    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: None)
+    monkeypatch.setattr("tradeup.web.CSFloatPricer",
+                        lambda *a, **k: StaticPricer(prix))
+
+    job = app.start_inventory("mil-spec")
+    for _ in range(100):
+        if job.state != "running":
+            break
+        time.sleep(0.05)
+
+    ligne = app.inventory_job_payload(job)["results"][0]
+    for champ in ("gain", "roi", "win_probability", "stdev",
+                  "outcomes_count", "always_profitable"):
+        assert champ in ligne, champ
+    assert 0.0 <= ligne["win_probability"] <= 1.0

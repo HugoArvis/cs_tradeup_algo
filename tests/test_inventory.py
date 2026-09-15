@@ -23,7 +23,7 @@ from tradeup.inventory import (
     resolve,
     summary,
 )
-from tradeup.models import Rarity
+from tradeup.models import Rarity, Skin
 from tradeup.pricing.repository import StaticPricer
 from tradeup.wear import wear_of
 
@@ -237,3 +237,73 @@ def test_lecart_au_compte_est_chiffre(db, bank):
     ecarts = closest_gaps(db, inventaire(bank, n=4), Rarity.INDUSTRIAL)
     assert ecarts == [("The Bank Collection", 4)]
     assert closest_gaps(db, [], Rarity.INDUSTRIAL) == []
+
+
+# --- Classement --------------------------------------------------------------
+
+
+def test_le_classement_change_reellement_lordre(db, bank):
+    """Le gain brut et la probabilite ne designent pas le meme gagnant."""
+    from tradeup.scoring import Ranking
+
+    rarity = Rarity.INDUSTRIAL
+    autre = next(
+        c for c in db.tradeable_collections(rarity)
+        if c.id != bank.id and len(c.by_rarity(rarity)) >= 2
+        and c.outcomes_for_input_rarity(rarity)
+    )
+
+    valeurs = {}
+    # Bank : toutes les sorties rapportent un peu plus que les entrees.
+    for s in bank.by_rarity(rarity):
+        for w in s.available_wears():
+            valeurs[s.market_hash_name(w)] = 1.0
+    for s in bank.by_rarity(rarity.next_up):
+        for w in s.available_wears():
+            valeurs[s.market_hash_name(w)] = 12.0
+    # L'autre : une seule sortie paie, mais tres gros.
+    for s in autre.by_rarity(rarity):
+        for w in s.available_wears():
+            valeurs[s.market_hash_name(w)] = 1.0
+    sorties = autre.outcomes_for_input_rarity(rarity)
+    for i, s in enumerate(sorties):
+        for w in s.available_wears():
+            valeurs[s.market_hash_name(w)] = 400.0 if i == 0 else 0.5
+
+    pricer = StaticPricer(valeurs)
+    items = inventaire(bank) + inventaire(autre)
+
+    par_gain = best_tradeups(db, items, pricer, rarity, include_losing=True,
+                             ranking=Ranking.EV)
+    par_proba = best_tradeups(db, items, pricer, rarity, include_losing=True,
+                              ranking=Ranking.SAFETY)
+    assert len(par_gain) == 2 and len(par_proba) == 2
+
+    # La loterie gagne au gain espere, la reguliere gagne a la probabilite.
+    assert par_gain[0].collection.id == autre.id
+    assert par_proba[0].collection.id == bank.id
+    assert par_proba[0].result.profit_probability == pytest.approx(1.0)
+    assert par_proba[0].always_profitable
+
+
+def test_toutes_rentables_se_reconnait():
+    from tradeup.ev import Outcome, TradeUpResult
+    from tradeup.inventory import InventoryTradeUp
+    from tradeup.models import Wear
+
+    def contrat(nets, cout=10.0):
+        skin = Skin(key="s", name="S", collection_id="c", rarity=Rarity.MIL_SPEC,
+                    min_float=0.0, max_float=1.0)
+        outcomes = tuple(
+            Outcome(skin=skin, float_value=0.1, wear=Wear.FACTORY_NEW,
+                    probability=1 / len(nets), net_value=n, priced=True)
+            for n in nets
+        )
+        res = TradeUpResult(outcomes=outcomes, inputs=(), cost=cout,
+                            avg_input_float=0.1, avg_normalized=0.1,
+                            stattrak=False, unpriced_probability=0.0)
+        return InventoryTradeUp(result=res, options=(), collection=None,
+                                rarity=Rarity.MIL_SPEC, items=())
+
+    assert contrat([11.0, 12.0, 13.0]).always_profitable
+    assert not contrat([11.0, 12.0, 9.0]).always_profitable
