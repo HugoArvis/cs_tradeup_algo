@@ -650,7 +650,7 @@ def cmd_inventory(args) -> int:
           f"{bilan['utilisables']} utilisables en contrat", file=sys.stderr)
     for cle, libelle in (("sans_float", "sans float"),
                          ("verrouilles", "non echangeables (verrou 7 jours)"),
-                         ("souvenirs", "Souvenir (interdits en contrat)"),
+                         ("souvenirs", "Souvenir (admis depuis le 21/05/2026)"),
                          ("en_vente", "actuellement en vente")):
         if bilan[cle]:
             print(f"  {bilan[cle]} {libelle}", file=sys.stderr)
