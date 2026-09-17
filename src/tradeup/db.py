@@ -20,6 +20,9 @@ class SkinDatabase:
     _by_key: dict[str, Skin]
     _by_market_name: dict[str, Skin]
     source_version: str = "unknown"
+    # Donnees brutes des caisses, lues a la demande par `tradeup.gold`. Les
+    # golds n'appartiennent a aucune collection : ils n'ont que des caisses.
+    raw_crates: tuple = ()
 
     @classmethod
     def load(cls, path: Path | str | None = None) -> "SkinDatabase":
@@ -62,6 +65,7 @@ class SkinDatabase:
             _by_key=by_key,
             _by_market_name=by_market,
             source_version=raw.get("version", "unknown"),
+            raw_crates=tuple(raw.get("crates", ())),
         )
 
     # --- Acces ---
@@ -79,6 +83,17 @@ class SkinDatabase:
                 return s
         matches = [s for n, s in self._by_market_name.items() if needle in n.lower()]
         return matches[0] if len(matches) == 1 else None
+
+    def crates(self) -> list:
+        """Caisses pouvant produire un gold (couteau ou gants).
+
+        Structure distincte des collections : cinq Covert d'une caisse donnent
+        un gold de SON pool, alors qu'un contrat d'armes prend dix entrees
+        d'une collection.
+        """
+        from .gold import load_crates
+
+        return load_crates({"crates": list(self.raw_crates)})
 
     def collection(self, cid: str) -> Collection:
         return self.collections[cid]

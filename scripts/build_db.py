@@ -8,11 +8,23 @@ Usage :
     python -m scripts.build_db                 # telecharge et ecrit data/collections.json
     python -m scripts.build_db --from skins.json  # depuis un fichier local
 
-On ne conserve que ce qui est pertinent pour un trade-up :
-  - categorie arme (les couteaux/gants ne sont ni entree ni sortie valide),
-  - rarete dans l'echelle Consumer..Covert,
-  - un range de float exploitable,
-  - une collection connue.
+Deux structures en sortie, parce que le jeu en a deux :
+
+  `collections` -- les contrats d'ARMES, dix entrees d'une rarete vers une de la
+  rarete au-dessus. Categorie arme, rarete Consumer..Covert, float exploitable,
+  collection connue.
+
+  `crates` -- le contrat vers un GOLD (couteau ou gants) : CINQ Covert d'une
+  caisse donnent un objet de son pool de golds. Possible depuis octobre 2025.
+  Les golds n'ont pas de `collections` dans la source, seulement des `crates` :
+  c'est pourquoi ils demandent une structure a part et non une collection de
+  plus.
+
+  Chaque gold porte SON range de float, et ils different largement au sein
+  d'une meme caisse -- le Kukri Fade va de 0 a 0.08, le Safari Mesh de 0.06 a
+  0.80. Pour une meme moyenne d'entree, l'un sort Factory New et l'autre
+  Field-Tested. Supposer un range commun fait esperer des sorties qui
+  n'arriveront pas.
 """
 
 from __future__ import annotations
@@ -58,6 +70,63 @@ def slugify(name: str) -> str:
         elif out and out[-1] != "-":
             out.append("-")
     return "".join(out).strip("-")
+
+
+GOLD_CATEGORIES = {"Knives", "Gloves"}
+#: Le contrat vers un gold prend CINQ entrees, pas dix.
+GOLD_INPUT_COUNT = 5
+
+
+def normalize_crates(raw_skins: list[dict]) -> list[dict]:
+    """Caisses pouvant produire un gold : leurs Covert et leur pool de golds.
+
+    Une caisse n'est exploitable que si elle a les deux -- des Covert a mettre
+    en entree et des golds a en sortir.
+    """
+    par_caisse: dict[str, dict] = {}
+
+    for item in raw_skins:
+        rarity = (item.get("rarity") or {}).get("name")
+        categorie = (item.get("category") or {}).get("name")
+        est_gold = categorie in GOLD_CATEGORIES
+        if not est_gold and rarity != "Covert":
+            continue
+
+        nom = item.get("name") or ""
+        if "(" in nom:
+            nom = nom.split("(")[0].strip()
+        if not nom:
+            continue
+
+        min_f, max_f = item.get("min_float"), item.get("max_float")
+        if est_gold and (min_f is None or max_f is None or not (0 <= min_f < max_f <= 1)):
+            continue
+
+        for crate in (item.get("crates") or []):
+            cid = crate.get("id") or slugify(crate.get("name", ""))
+            bucket = par_caisse.setdefault(
+                cid,
+                {"id": cid, "name": crate.get("name") or cid,
+                 "inputs": [], "golds": []},
+            )
+            if est_gold:
+                if any(g["name"] == nom for g in bucket["golds"]):
+                    continue
+                bucket["golds"].append({
+                    "key": f"{cid}::{slugify(nom)}",
+                    "name": nom,
+                    "min_float": round(float(min_f), 6),
+                    "max_float": round(float(max_f), 6),
+                    "stattrak": bool(item.get("stattrak", False)),
+                })
+            elif nom not in bucket["inputs"]:
+                bucket["inputs"].append(nom)
+
+    utiles = [c for c in par_caisse.values() if c["inputs"] and c["golds"]]
+    for c in utiles:
+        c["inputs"].sort()
+        c["golds"].sort(key=lambda g: g["name"])
+    return sorted(utiles, key=lambda c: c["name"])
 
 
 def normalize(raw_skins: list[dict]) -> dict:
@@ -124,6 +193,7 @@ def normalize(raw_skins: list[dict]) -> dict:
         "version": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "source": SOURCE_URL,
         "collections": sorted(by_collection.values(), key=lambda c: c["name"]),
+        "crates": normalize_crates(raw_skins),
         "_stats": dict(stats),
     }
 

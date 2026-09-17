@@ -219,6 +219,20 @@ moteur produit déjà. Deux pièges :
   (`stattrak`, lui, est correctement réparti 754/697). Il ne distingue rien et ne
   doit servir à aucune décision — il vient tel quel de l'API source.
 
+**Le contrat vers un GOLD est une autre mécanique** (module `gold`, commande
+`knife`) : **cinq** Covert d'une même **caisse** — pas dix, pas une collection —
+donnent un couteau ou des gants de son pool, à probabilité **uniforme**
+(vérifié contre un calculateur de référence : 13 Kukri, même chance chacun).
+Les golds n'ont aucune `collections` dans la source, seulement des `crates`,
+d'où la structure séparée ; `build_db` les excluait jusqu'ici.
+
+**Les golds d'une même caisse n'ont pas le même range de float**, et c'est le
+piège : Kukri Fade 0–0,08, Safari Mesh 0,06–0,80, Slaughter 0,01–0,26. Pour une
+seule moyenne d'entrée, le premier sort Factory New à 148 €, le deuxième
+Field-Tested à 37 €. Supposer un range commun faisait annoncer +8,5 % un contrat
+qui perd 58 %. `ev.evaluate()` gérait déjà ce cas — `output_float` lit le range
+de chaque sortie ; c'est un script d'analyse qui avait triché, pas le moteur.
+
 **Un contrat StatTrak ne mélange rien** : entrées StatTrak, sorties StatTrak, et
 `StatTrak™ AK-47 | Redline (FT)` est un **autre objet de marché** avec son prix
 et son volume. `--stattrak` filtre entrées et sorties (`inputs_for_rarity`,

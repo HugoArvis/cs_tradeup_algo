@@ -26,6 +26,7 @@ from .pricing.steam import CURRENCIES, SteamMarket
 from .plan import build_plan
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
+from .gold import GOLD_INPUT_COUNT, scan_crates
 from .inventory import (
     best_tradeups as best_inventory_tradeups,
     closest_gaps as inventory_gaps,
@@ -711,6 +712,67 @@ def cmd_inventory(args) -> int:
     return 0
 
 
+def cmd_knife(args) -> int:
+    """Contrats vers un GOLD : cinq Covert d'une caisse, un couteau ou des gants."""
+    db = SkinDatabase.load(args.db)
+    pricer, cache = _make_pricer(args)
+
+    caisses = db.crates()
+    if args.crate:
+        voulues = [c for c in caisses
+                   if args.crate.lower() in c.name.lower()]
+        if not voulues:
+            print(f"Caisse introuvable : {args.crate!r}\n"
+                  f"{len(caisses)} caisses connues, ex : "
+                  + ", ".join(c.name for c in caisses[:4]), file=sys.stderr)
+            cache.close()
+            return 1
+        caisses = voulues
+
+    if not args.offline:
+        noms = set()
+        for c in caisses:
+            for nom in c.inputs:
+                skin = db.find(nom)
+                if skin:
+                    noms |= {skin.market_hash_name(w)
+                             for w in skin.available_wears()}
+            for g in c.golds:
+                noms |= {g.market_hash_name(w) for w in g.available_wears()}
+        eta = pricer.buy_source.estimated_duration(len(noms)) / 60
+        print(f"{len(caisses)} caisses -> {len(noms)} cotations (~{eta:.0f} min).",
+              file=sys.stderr)
+        if eta > 5 and not args.yes:
+            print("Relance avec --yes, ou --offline pour n'utiliser que le cache.",
+                  file=sys.stderr)
+            cache.close()
+            return 2
+        prefetch(pricer, sorted(noms), progress=_progress("prix"))
+
+    plans = scan_crates(caisses, db, pricer,
+                        float_percentile=args.float_pct, limit=args.limit)
+    _alerte_age_cache(pricer)
+
+    if not plans:
+        print("Aucune caisse evaluable : il manque les prix.")
+        cache.close()
+        return 1
+
+    rentables = [p for p in plans if p.ev_profit > 0]
+    print(f"\n{len(plans)} caisse(s) evaluee(s), {len(rentables)} rentable(s). "
+          f"Montants en {args.currency}.")
+    print(f"Un contrat prend {GOLD_INPUT_COUNT} Covert de la MEME caisse.\n")
+    for i, plan in enumerate(plans, 1):
+        if plan.ev_profit <= 0 and not args.all:
+            continue
+        print(f"[{i}] {plan.report()}")
+        print()
+    if not rentables and not args.all:
+        print("Aucune n'est rentable. --all pour voir le classement complet.")
+    cache.close()
+    return 0
+
+
 def cmd_orders(args) -> int:
     """A quel prix d'ordre d'achat chaque contrat devient-il rentable ?
 
@@ -1056,6 +1118,25 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--api-key", default=None, help="sinon lue depuis .env")
     add_pricing_args(s)
     s.set_defaults(func=cmd_inventory)
+
+    s = sub.add_parser(
+        "knife", help="contrats vers un couteau ou des gants (5 Covert)")
+    s.add_argument("--crate", default=None, help="restreindre a une caisse")
+    s.add_argument("--limit", type=int, default=10)
+    s.add_argument("--all", action="store_true",
+                   help="montrer aussi les caisses perdantes")
+    s.add_argument("--float-pct", type=float, default=0.5,
+                   help="position du float d'entree dans son palier "
+                        "(0.5 = milieu, l'esperance d'un achat au palier)")
+    s.add_argument("--offline", action="store_true")
+    s.add_argument("--yes", action="store_true")
+    s.add_argument("--min-volume", type=int, default=0)
+    s.add_argument("--margin", type=float, default=0.05)
+    s.add_argument("--buy-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--sell-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--api-key", default=None)
+    add_pricing_args(s)
+    s.set_defaults(func=cmd_knife)
 
     s = sub.add_parser(
         "orders",
