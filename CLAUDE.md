@@ -116,6 +116,14 @@ faite 33 % sous le marché. `/history/{nom}/graph` donne les ventes par jour,
 `/history/{nom}/sales` les transactions réelles — `CSFloatPricer.sales_stats()`
 les expose pour dire combien de temps une revente prendra.
 
+C'est le facteur **dominant**, devant le choix de stratégie. Mesuré sur quatre
+collections Mil-Spec aux prix d'ordre : le gain s'annule autour de **18 % de
+décote de revente**, que le contrat gagne 100 % du temps ou 51 % du temps — le
+seuil est le même (18,8 % pour Bank, 18,1 % pour Fracture). Or le seul contrat
+réellement exécuté du projet a subi 33 %. Tant que sa propre décote n'est pas
+mesurée, arbitrer entre un contrat sûr et un contrat répété revient à comparer
+deux nombres dont le troisième décide.
+
 **Mélanger deux collections est possible mais gagne rarement**
 (`scan --max-collections 2` ; `plan` et `inventory` restent mono-collection).
 À paliers de sortie fixes, l'EV brute vaut `(n_A·V_A + n_B·V_B) / (n_A·k_A +
