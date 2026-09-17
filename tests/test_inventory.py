@@ -150,12 +150,30 @@ def test_un_objet_verrouille_est_ecarte(db, bank):
                          include_losing=True) == []
 
 
-def test_un_souvenir_ne_peut_pas_entrer_en_contrat():
-    """Regle du jeu, et non simple accident de reconnaissance de nom."""
+def test_un_souvenir_peut_entrer_en_contrat_depuis_mai_2026():
+    """La regle a change : "Souvenir quality items can now be selected in
+    Trade Up Contract" (mise a jour du 21 mai 2026).
+
+    Le prefixe reste detecte -- il sert a reconnaitre le skin sous-jacent et a
+    coter le bon objet de marche -- mais il ne bloque plus.
+    """
     souvenir = OwnedItem("Souvenir M4A4 | Tornado (Field-Tested)", 0.2)
     normal = OwnedItem("M4A4 | Tornado (Field-Tested)", 0.2)
-    assert souvenir.souvenir and not souvenir.usable
+    assert souvenir.souvenir and souvenir.usable
     assert not normal.souvenir and normal.usable
+
+
+def test_un_souvenir_est_rattache_a_son_skin(db):
+    """Sans retrait du prefixe, la base ne reconnait pas l'objet et l'ignore."""
+    from tradeup.wear import wear_of
+
+    skin = db.find("AK-47 | Redline")
+    assert skin is not None
+    f = (skin.min_float + skin.max_float) / 2
+    nom = f"Souvenir {skin.market_hash_name(wear_of(f))}"
+    apparies = resolve(db, [OwnedItem(nom, f)])
+    assert len(apparies) == 1
+    assert apparies[0][1].key == skin.key
 
 
 def test_un_objet_sans_float_est_ecarte():
@@ -226,10 +244,11 @@ def test_le_bilan_compte_ce_qui_bloque(db, bank):
     )
     bilan = summary(db, items)
     assert bilan["objets"] == 6
-    assert bilan["utilisables"] == 3
+    # Le Souvenir compte desormais parmi les utilisables : 3 + lui.
+    assert bilan["utilisables"] == 4
     assert bilan["sans_float"] == 1
     assert bilan["verrouilles"] == 1
-    assert bilan["souvenirs"] == 1
+    assert bilan["souvenirs"] == 1  # toujours compte, pour information
 
 
 def test_lecart_au_compte_est_chiffre(db, bank):

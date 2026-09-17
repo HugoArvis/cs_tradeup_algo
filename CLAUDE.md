@@ -196,9 +196,17 @@ invisible.
 
 Un objet possédé a un float **exact** (σ = 0) et est **unique** (sélection 0/1).
 `/me/inventory` sur CSFloat est la seule source qui donne ces floats — Steam ne
-renvoie que des noms. `tradable` y porte le verrou de 7 jours, et un **Souvenir
-ne peut jamais entrer dans un contrat** (règle du jeu, testée explicitement :
-sans ça il n'était écarté que faute d'être reconnu, ce qui est un accident).
+renvoie que des noms. `tradable` y porte le verrou de 7 jours.
+
+**Les Souvenir sont admis depuis le 21 mai 2026** — « Souvenir quality items can
+now be selected in Trade Up Contract alongside normal quality items. All Souvenir
+attributes will be removed ». La sortie est donc un skin **normal**, ce que le
+moteur produit déjà. Deux pièges :
+- le préfixe du nom de marché fait foi, et il doit être retiré pour retrouver le
+  skin dans la base, sinon l'objet est ignoré sans bruit ;
+- le champ `Skin.souvenir` de la base statique vaut **True sur les 1451 skins**
+  (`stattrak`, lui, est correctement réparti 754/697). Il ne distingue rien et ne
+  doit servir à aucune décision — il vient tel quel de l'API source.
 
 **Un contrat StatTrak ne mélange rien** : entrées StatTrak, sorties StatTrak, et
 `StatTrak™ AK-47 | Redline (FT)` est un **autre objet de marché** avec son prix

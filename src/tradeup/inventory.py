@@ -62,12 +62,20 @@ class OwnedItem:
 
     @property
     def souvenir(self) -> bool:
-        """Un Souvenir ne peut PAS entrer dans un contrat -- regle du jeu.
+        """Cet objet est-il de qualite Souvenir ?
 
-        Le nom de marche porte le prefixe. Sans ce test, un Souvenir n'etait
-        ecarte que parce que la base ne le reconnaissait pas : un accident, pas
-        une decision, et qui disparaitrait a la premiere amelioration de la
-        recherche par nom.
+        Ils ETAIENT interdits en contrat ; ils ne le sont plus depuis la mise a
+        jour du 21 mai 2026 : "Souvenir quality items can now be selected in
+        Trade Up Contract alongside normal quality items. All Souvenir
+        attributes will be removed from any souvenir items selected."
+
+        Le prefixe du nom de marche fait foi. Le champ `souvenir` de la base
+        statique, lui, vaut True sur les 1451 skins : il ne distingue rien et ne
+        doit pas servir a decider.
+
+        Consequence a garder en tete : la sortie perd les attributs Souvenir,
+        donc elle se valorise comme un skin NORMAL -- ce que le moteur fait
+        deja, puisqu'il ne produit jamais de Souvenir.
         """
         return self.market_hash_name.startswith("Souvenir ")
 
@@ -78,12 +86,10 @@ class OwnedItem:
         Le float est indispensable : sans lui on ne sait pas calculer l'usure de
         sortie. `tradable` porte le verrou de 7 jours -- un objet recu par
         echange n'est pas utilisable avant, et l'API le dit.
+
+        Les Souvenir ne sont plus exclus (voir `souvenir`).
         """
-        return (
-            self.float_value is not None
-            and self.tradable
-            and not self.souvenir
-        )
+        return self.float_value is not None and self.tradable
 
     @property
     def decorated(self) -> bool:
@@ -302,7 +308,9 @@ def resolve(db: SkinDatabase, items: Sequence[OwnedItem]) -> list[tuple[OwnedIte
         nom = item.market_hash_name
         # Retirer le prefixe StatTrak et le palier d'usure pour retrouver le
         # skin : la base indexe "AK-47 | Redline", pas le nom de marche complet.
-        base = nom.replace("StatTrak™ ", "").replace("★ ", "")
+        base = (nom.replace("StatTrak™ ", "")
+                   .replace("Souvenir ", "")
+                   .replace("★ ", ""))
         if "(" in base:
             base = base[: base.rindex("(")].strip()
         skin = db.find(base)
