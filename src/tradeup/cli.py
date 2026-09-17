@@ -33,6 +33,12 @@ from .inventory import (
     load_file as load_inventory_file,
     summary as inventory_summary,
 )
+from .orders import (
+    DEFAULT_MAX_DISCOUNT,
+    DEFAULT_TARGET_ROI,
+    fill_estimate,
+    scan_orders,
+)
 from .refresh import DEFAULT_DRIFT_THRESHOLD, collection_roles, refresh_quotes
 from .report import write_and_open
 from .scan import prefetch, required_market_names, scan
@@ -678,6 +684,89 @@ def cmd_inventory(args) -> int:
     return 0
 
 
+def cmd_orders(args) -> int:
+    """A quel prix d'ordre d'achat chaque contrat devient-il rentable ?
+
+    Renverse la question habituelle. On ne demande plus si le contrat passe au
+    prix affiche, mais combien il faut obtenir de rabais pour qu'il passe --
+    puis on place les ordres et on attend.
+    """
+    db = SkinDatabase.load(args.db)
+    rarity = RARITY_ALIASES[args.rarity]
+    pricer, cache = _make_pricer(args)
+
+    collections = None
+    if args.collections:
+        voulues = [db.find_collection(c) for c in args.collections]
+        manquantes = [c for c, f in zip(args.collections, voulues) if f is None]
+        if manquantes:
+            print(f"Collections introuvables : {manquantes}", file=sys.stderr)
+            cache.close()
+            return 1
+        collections = [c for c in voulues if c is not None]
+
+    if not args.offline:
+        noms = required_market_names(
+            db, collections or db.tradeable_collections(rarity, args.stattrak),
+            rarity, args.stattrak,
+        )
+        eta = pricer.buy_source.estimated_duration(len(noms)) / 60
+        print(f"{len(noms)} cotations a recuperer (~{eta:.0f} min).",
+              file=sys.stderr)
+        if eta > 5 and not args.yes:
+            print("Relance avec --yes, ou --offline pour n'utiliser que le cache.",
+                  file=sys.stderr)
+            cache.close()
+            return 2
+        prefetch(pricer, noms, progress=_progress("prix"))
+
+    plans = scan_orders(
+        db, rarity, pricer,
+        collections=collections,
+        target_roi=args.target_roi,
+        max_discount=args.max_discount,
+        stattrak=args.stattrak,
+        keep_unfeasible=args.all,
+    )
+
+    if not plans:
+        print(
+            f"Aucune collection en {rarity.label} ne devient rentable avec un "
+            f"rabais d'au plus {args.max_discount:.0%}.\n"
+            f"Augmente --max-discount pour voir les cas plus exigeants, ou "
+            f"baisse --target-roi."
+        )
+        cache.close()
+        return 0
+
+    print(f"\n{len(plans)} collection(s) ou des ordres d'achat peuvent rendre "
+          f"le contrat rentable.")
+    print(f"Montants en {args.currency}. Classees par rabais croissant : le "
+          f"plus facile a obtenir d'abord.\n")
+
+    for i, plan in enumerate(plans, 1):
+        print(f"[{i}] {plan.report()}")
+        # Le delai de remplissage decide du rythme, pas le profit affiche.
+        goulot = min(plan.lines, key=lambda l: l.order_price)
+        skin = db.find(goulot.name[: goulot.name.rindex("(")].strip())
+        volume = None
+        if skin is not None:
+            from .wear import wear_of
+            volume = pricer.buy_volume(skin, wear_of(0.0))
+        print(f"  Delai d'un ordre a ce rabais : "
+              f"{fill_estimate(volume, plan.discount)}")
+        print()
+
+    print(
+        "Rappel : un ordre d'achat n'est pas un achat. Tant qu'il n'est pas "
+        "servi,\nle prix de la SORTIE continue de bouger -- recote avec "
+        "`verify` avant de fusionner.",
+        file=sys.stderr,
+    )
+    cache.close()
+    return 0
+
+
 def cmd_verify(args) -> int:
     """Recote des objets et dit ce qui a bouge depuis le dernier releve.
 
@@ -936,6 +1025,31 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--api-key", default=None, help="sinon lue depuis .env")
     add_pricing_args(s)
     s.set_defaults(func=cmd_inventory)
+
+    s = sub.add_parser(
+        "orders",
+        help="prix d'ordre d'achat qui rend chaque contrat rentable")
+    s.add_argument("--rarity", default="mil-spec", choices=sorted(RARITY_ALIASES))
+    s.add_argument("--collections", nargs="*", help="restreindre a ces collections")
+    s.add_argument("--target-roi", type=float, default=DEFAULT_TARGET_ROI,
+                   help="rendement vise (defaut 20 %%) : a l'equilibre exact, "
+                        "la moindre variation rend le contrat perdant")
+    s.add_argument("--max-discount", type=float, default=DEFAULT_MAX_DISCOUNT,
+                   help="rabais maximal juge realiste (defaut 35 %%) ; au-dela "
+                        "l'ordre n'est jamais servi")
+    s.add_argument("--all", action="store_true",
+                   help="montrer aussi les contrats hors de portee")
+    s.add_argument("--stattrak", action="store_true")
+    s.add_argument("--offline", action="store_true", help="n'utiliser que le cache")
+    s.add_argument("--yes", action="store_true", help="ne pas demander confirmation")
+    s.add_argument("--min-volume", type=int, default=0)
+    s.add_argument("--min-input-volume", type=int, default=3)
+    s.add_argument("--margin", type=float, default=0.05)
+    s.add_argument("--buy-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--sell-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--api-key", default=None)
+    add_pricing_args(s)
+    s.set_defaults(func=cmd_orders)
 
     s = sub.add_parser("verify",
                        help="recoter et mesurer la derive depuis le dernier releve")

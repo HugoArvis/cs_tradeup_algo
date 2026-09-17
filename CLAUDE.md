@@ -35,6 +35,7 @@ python scripts/check_js.py            # apres toute retouche du JS de web.py
 python -m tradeup.web                 # application locale, port 8765
 python -m tradeup.cli plan "The Bank Collection" --rarity industrial --html
 python -m tradeup.cli verify --collection "The Bank Collection" --rarity industrial
+python -m tradeup.cli orders --rarity mil-spec   # prix d'ordre d'achat a placer
 ```
 
 Le raccourci `tradeup` n'est pas dans le `PATH` : passer par `python -m tradeup.cli`.
@@ -143,6 +144,27 @@ partagés par `scan --rank`, `inventory --rank` et les deux listes de
 l'application web, qui reclassent **côté client** : réordonner des contrats déjà
 calculés ne doit rien recoûter en quota.
 
+**Un ordre d'achat ne subit pas le prix, il le fixe** — d'où la commande
+`orders`, qui renverse le calcul : au lieu de `profit = EV − coût(marché)`, elle
+résout `budget = EV / (1 + rendement visé)` et en déduit le prix maximal de
+chaque entrée. La valeur de la sortie ne dépend pas de ce qu'on a payé les
+entrées, donc elle se calcule une fois et le reste suit.
+
+Trois contraintes que ce mode ne doit pas perdre de vue :
+- le float est **subi** (`float_model="random"` imposé) : un ordre ne filtre
+  aucune annonce, viser un bas float serait mentir ;
+- la probabilité de gain se calcule **au prix d'ordre**, pas au prix du marché.
+  Mesuré sur The Bank Collection en Mil-Spec : 0 % de chances de gagner au prix
+  demandé, **100 % avec 32 % de rabais**. Afficher la probabilité du marché à
+  côté d'un budget réduit donnait deux lignes contradictoires ;
+- un ordre trop bas n'est jamais servi. `max_discount` (35 %) écarte ces cas au
+  lieu de les présenter comme des occasions, et `STEAM_MIN_PRICE` (0,03) marque
+  ceux qu'aucun rabais ne peut sauver.
+
+Les frais Steam ont un **plancher de 0,01 par frais**, donc ils écrasent les
+petits montants à la vente : 66 % sur un objet à 0,03 €, 28,6 % à 0,07 €, contre
+12–13 % au-delà de 0,25 €. À l'achat, le prix affiché est ce qu'on paie.
+
 **Un skin possédé coûte ce qu'il vaut à la revente, pas ce qu'on l'a payé.** Le
 prix d'achat est irrécupérable et ne doit peser sur aucune décision ; le compter
 à zéro (« je l'ai déjà ») rend tout contrat rentable et pousse à fondre des skins
@@ -213,7 +235,13 @@ persistant ne se réessaie pas, il s'attend — `web.Batch` met en pause 10 min
 sans retirer la collection de la file.
 
 Steam limite à ~15 req/min et ne donne aucun float. `SteamMarket.order_book()`
-est mort : le HTML ne contient plus `item_nameid`.
+est mort, mais pas pour la raison qu'on croit : **l'endpoint
+`itemordershistogram` répond toujours** (`success=1`, `highest_buy_order`
+renseigné, vérifié en septembre 2026). C'est la table nom → `item_nameid` qui
+est perdue — les pages marché sont devenues une application cliente qui adresse
+les objets par un identifiant opaque (`G182320AB023004`), et le HTML de 2,9 Mo
+ne contient plus aucun entier exploitable. Rouvrir le carnet demande donc une
+source d'identifiants, pas un nouvel endpoint.
 
 ## Données locales
 
