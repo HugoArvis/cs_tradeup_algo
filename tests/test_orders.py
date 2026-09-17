@@ -210,3 +210,35 @@ def test_le_delai_depend_du_rabais_et_du_volume():
     assert "immediat" in fill_estimate(100, 0.0)
     assert fill_estimate(100, 0.05) != fill_estimate(100, 0.30)
     assert "jamais" in fill_estimate(100, 0.80)
+
+
+# --- Age des cotations -------------------------------------------------------
+
+
+def test_lage_des_cotations_est_mesurable(tmp_path):
+    """Hors ligne le TTL est ignore : une cotation de six semaines passe sans
+    un mot et donne un scan d'apparence normale, entierement faux."""
+    import time
+
+    from tradeup.pricing.base import Quote
+    from tradeup.pricing.cache import QuoteCache
+    from tradeup.pricing.repository import MarketPricer
+
+    maintenant = time.time()
+
+    class Source:
+        name = "steam"
+        currency = "EUR"
+
+        def fetch(self, name, *, use_cache=True):
+            jours = {"vieux": 42, "moyen": 2, "frais": 0}[name]
+            return Quote(name, "steam", 1.0, 1.0, 10, currency="EUR",
+                         fetched_at=maintenant - jours * 86400)
+
+    pricer = MarketPricer(Source())
+    assert pricer.quote_age() is None  # rien de charge encore
+
+    pricer.warm(["vieux", "moyen", "frais"])
+    median, maxi = pricer.quote_age()
+    assert 1.5 * 86400 < median < 2.5 * 86400
+    assert 41 * 86400 < maxi < 43 * 86400

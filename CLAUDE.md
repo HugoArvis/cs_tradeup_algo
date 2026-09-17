@@ -229,6 +229,21 @@ signes opposés en variation brute. `refresh.Drift.impact` porte ce signe ;
 `verify` sort en code 1 dès qu'une dérive défavorable dépasse le seuil, pour
 qu'un script s'arrête avant d'exécuter.
 
+**Revendre sur Steam rapporte plus que sur CSFloat, malgré des frais 6× plus
+élevés.** Contre-intuitif, donc mesuré en direct sur trois sorties Mil-Spec :
+net Steam 4,01 / 2,09 / 1,00 € contre 3,42 / 1,52 / 0,75 € sur CSFloat, soit
++17 à +37 % pour Steam. Les prix bruts CSFloat sont structurellement plus bas —
+c'est bien pour cela que `plan` y **achète**. La liquidité va dans le même sens
+sur ce segment : 98 et 83 ventes/jour sur Steam contre 8 et 10 sur CSFloat.
+CSFloat ne l'emporte que sur un point, décisif si l'objectif est de sortir de
+l'argent : son porte-monnaie est retirable, pas celui de Steam.
+
+**Hors ligne, le TTL du cache est ignoré : un prix de six semaines est servi
+sans un mot** et donne un scan d'apparence normale, entièrement faux. Mesuré :
+un Tec-9 | Brother (Factory New) affiché à 12,97 € par un cache de 42 jours en
+valait 4,61 € au marché, soit −64 %. `MarketPricer.quote_age()` expose l'âge
+médian et maximal ; `scan` et `orders` alertent au-delà de 24 h.
+
 **L'API CSFloat cote en USD**, le site facture dans la devise du profil.
 `web.App.conv()` convertit ; le cache SQLite indexe par devise.
 

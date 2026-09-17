@@ -154,6 +154,32 @@ def _make_pricer(args) -> tuple[MarketPricer, QuoteCache]:
     return pricer, cache
 
 
+def _alerte_age_cache(pricer) -> None:
+    """Dit sur quel age de cotations le calcul a travaille.
+
+    Hors ligne le TTL est ignore, donc rien ne distingue un cache d'une heure
+    d'un cache de six semaines. Or un prix de six semaines produit un resultat
+    d'apparence normale et entierement faux.
+    """
+    ages = pricer.quote_age()
+    if ages is None:
+        return
+    median, maxi = ages
+    heures = median / 3600
+    if heures < 24:
+        return
+    print(
+        f"ATTENTION : prix vieux de {heures / 24:.0f} jours en mediane "
+        f"({maxi / 3600 / 24:.0f} au pire).\n"
+        f"  Les cotations ne sont pas rafraichies hors ligne. Un Tec-9 | "
+        f"Brother (Factory New)\n"
+        f"  affiche a 12.97 par un cache de 42 jours en valait 4.61 au "
+        f"marche, soit -64 %.\n"
+        f"  Recote avant de decider : verify --collection <nom>",
+        file=sys.stderr,
+    )
+
+
 # --- Commandes ---------------------------------------------------------------
 
 
@@ -454,6 +480,7 @@ def cmd_scan(args) -> int:
 
     report = prefetch(pricer, names, progress=_progress("prix"))
     print(f"  prix : {report}", file=sys.stderr)
+    _alerte_age_cache(pricer)
 
     # Sans ce garde-fou, un cache vide produit "aucun contrat ne passe les
     # filtres" -- indiscernable d'un vrai scan sans opportunite. L'utilisateur
@@ -728,6 +755,10 @@ def cmd_orders(args) -> int:
         stattrak=args.stattrak,
         keep_unfeasible=args.all,
     )
+
+    # Apres le calcul : hors ligne, rien n'est precharge, les cotations ne sont
+    # lues qu'en cours de route.
+    _alerte_age_cache(pricer)
 
     if not plans:
         print(

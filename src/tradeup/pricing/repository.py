@@ -146,6 +146,20 @@ class MarketPricer:
         """Objets dont la liquidite n'a pas pu etre verifiee."""
         return sorted(self._volume_unknown)
 
+    def quote_age(self) -> tuple[float, float] | None:
+        """Age median et maximal des cotations chargees, en secondes.
+
+        Hors ligne, le TTL du cache est ignore : une cotation de six semaines
+        est servie sans un mot. Elle donne alors un scan d'apparence normale et
+        entierement faux -- mesure sur un Tec-9 | Brother (Factory New) affiche
+        a 12.97 par un cache de 42 jours, contre 4.61 au marche, soit -64 %.
+        Le scan doit pouvoir dire sur quel age il a travaille.
+        """
+        ages = sorted(q.age_seconds for q in self._quotes.values() if q)
+        if not ages:
+            return None
+        return ages[len(ages) // 2], ages[-1]
+
     def missing(self) -> list[str]:
         return sorted(name for (_, name), q in self._quotes.items() if q is None)
 
