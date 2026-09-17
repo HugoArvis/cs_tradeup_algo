@@ -110,6 +110,19 @@ silencieusement.
 des prix demandés, rien ne dit qu'ils se concluent. Retenir la moins chère
 annonce nue du palier.
 
+**Mais l'ignorer à l'ACHAT rend `scan` systématiquement optimiste**, et cette
+asymétrie est dangereuse : l'ignorer à la revente est prudent, l'ignorer à
+l'achat ne l'est pas. `build_options` retient le prix du palier tout en visant
+un float à `--float-pct` du bas — or un bas float coûte plus cher que le palier,
+quand il existe. Mesuré sur The Dead Hand Collection : `scan` proposait 5×
+P250 Kintsugi (FN) à 22,62 € sous 0,0105 de float ; sur CSFloat il n'en existait
+**qu'une seule** parmi 49 annonces nues, à **40,27 €** — 78 % de plus. Le contrat
+passait de +20 € annoncés à ~−93 € réels.
+
+Conséquence : `scan` sert à **pré-filtrer**, jamais à décider. Seul `plan`, qui
+lit des annonces réelles avec leurs floats et leurs prix, donne un chiffre
+opposable — et plus `--float-pct` est bas, plus l'écart se creuse.
+
 **Le prix affiché n'est pas ce qu'on encaisse.** Un contrat annoncé à +0,37 € a
 fini à −0,02 € : la valorisation était juste à 3 % près, mais la revente s'est
 faite 33 % sous le marché. `/history/{nom}/graph` donne les ventes par jour,

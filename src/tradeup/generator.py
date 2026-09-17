@@ -130,6 +130,17 @@ def build_options(
     palier". Sur CSFloat avec filtrage par float c'est realiste ; sur Steam,
     ou l'on ne choisit pas le float, il faut monter vers 0.5.
 
+    BIAIS CONNU, ET IL VA TOUJOURS DANS LE MEME SENS. Le prix retenu est celui
+    du PALIER, alors que le float vise est en bas de ce palier -- or un bas
+    float se paie plus cher, quand il existe seulement. Mesure sur The Dead Hand
+    Collection : un P250 | Kintsugi (Factory New) sous 0.0105 de float coutait
+    40.27 EUR sur CSFloat contre 22.62 au palier, et il n'y en avait qu'un pour
+    cinq exemplaires requis. Le contrat passait de +20 annonces a ~-93 reels.
+
+    Autrement dit : plus `float_percentile` est bas, plus cette fonction est
+    optimiste. Elle sert a pre-filtrer, pas a decider -- c'est `plan`, qui lit
+    des annonces reelles, qui tranche.
+
     Un contrat StatTrak n'accepte que des entrees StatTrak -- le jeu refuse le
     melange. Les skins sans variante StatTrak sont donc exclus.
     """
