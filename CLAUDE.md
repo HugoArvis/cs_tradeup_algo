@@ -88,6 +88,17 @@ Chacune vient d'un bug mesuré ; les tests les verrouillent.
 **Probabilité d'une sortie** : `P(s ∈ C) = n_C / Σ n_C' × k_C'`. Une collection
 à peu de sorties est globalement *moins* probable, pas plus.
 
+**Incertitude non levée sur le MULTI-collection.** Les sources publiques se
+contredisent : certaines donnent `P(collection) = n_C / 10` — proportionnel aux
+seules entrées — quand celle-ci pondère aussi par le nombre de sorties. Sur
+« 8 Mirage (2 sorties) + 2 Dust 2 (1 sortie) », la première donne 80/20, la
+nôtre 89/11.
+
+Les deux formules **coïncident exactement en mono-collection** (toutes deux
+donnent `1/k`), ce qui met hors de cause tout ce que le projet recommande
+aujourd'hui. Trancher demande une observation : noter la répartition réelle sur
+un contrat mixte exécuté, ou la comparer à un calculateur de référence.
+
 **Float de sortie** : moyenne des floats **normalisés** — chaque entrée ramenée
 à `(float − min_skin) / (max_skin − min_skin)` — puis remappée sur le range du
 skin de **sortie**. Moyenner les floats affichés est faux : sur un contrat réel,
