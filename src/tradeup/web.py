@@ -198,6 +198,10 @@ class App:
                     "name": c.name,
                     "outcomes": len(sorties),
                     "inputs": len(entrees),
+                    # Moyenne d'entree maximale gardant la sortie en Factory
+                    # New. Haut = presque n'importe quelle entree suffit ; bas
+                    # = il faut trier les annonces une par une.
+                    "fn_threshold": round(c.factory_new_threshold(rarity), 4),
                     # Cout en requetes CSFloat : une par couple (skin, usure).
                     "requests": sum(len(s.available_wears()) for s in entrees),
                 }
@@ -309,6 +313,7 @@ class App:
             "net": self.conv(r.ev_net),
             "gain": self.conv(plan.gain),
             "roi": round(r.roi, 4),
+            "profitability": round(r.profitability, 4),
             # Le gain seul est trompeur : un +2 une fois sur trois vaut moins
             # qu'un +0.50 a tous les coups. Le classement a besoin des deux.
             "win_probability": round(r.profit_probability, 4),
@@ -459,6 +464,7 @@ class App:
                 "net": payload["net"],
                 "profit": payload["profit"],
                 "roi": payload["roi"],
+                "profitability": payload.get("profitability", 0.0),
                 "outcomes": len(payload["outcomes"]),
                 "worst_profit": payload.get("worst_profit"),
                 "all_profitable": payload.get("all_profitable", False),
@@ -517,6 +523,8 @@ class App:
             "net": self.conv(r.ev_net),
             "profit": self.conv(r.ev_profit),
             "roi": round(r.roi, 4),
+            # Convention des guides : 1.0 = point mort, pas le profit.
+            "profitability": round(r.profitability, 4),
             "win_probability": round(r.profit_probability, 4),
             "outcomes_count": r.distinct_outcomes,
             "stdev": self.conv(r.stdev),
@@ -898,6 +906,21 @@ box-shadow:0 2px 10px rgba(0,0,0,.25)}
 #banniere.on{display:block}
 #banniere.err{background:var(--neg)}
 #banniere .spin{border-color:rgba(255,255,255,.4);border-top-color:#fff}
+/* --- Profitabilite : la metrique qui decide --- */
+/* 100 % est le point mort, pas le profit. Un contrat a 40 % rend 40 centimes
+   par euro engage : il en detruit 60. La couleur porte ce seuil pour qu'aucune
+   ligne ne soit lue a l'envers. */
+.prof{font-weight:700}
+.prof.go{color:var(--pos)}
+.prof.no{color:var(--neg)}
+.kpi .val.big{font-size:26px}
+.seuil{font-variant-numeric:tabular-nums}
+.seuil.facile{color:var(--pos);font-weight:600}
+.seuil.dur{color:var(--muted)}
+.jauge{height:4px;background:var(--line);border-radius:2px;overflow:hidden;
+margin-top:6px}
+.jauge i{display:block;height:100%;background:var(--pos)}
+.jauge i.no{background:var(--neg)}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);
 border-top-color:var(--accent);border-radius:50%;animation:s .8s linear infinite;
 vertical-align:-2px;margin-right:7px}
@@ -943,6 +966,8 @@ vertical-align:-2px;margin-right:7px}
   <p class="muted" id="compte">…</p>
   <div class="row" style="border-top:1px solid var(--line);padding-top:12px">
     <button class="ghost" id="balayer">Tout calculer pour cette rareté</button>
+    <label><input type="checkbox" id="bat-profitables"> seulement les
+      profitables (&gt; 100 %)</label>
     <label>Classer par
       <select id="bat-rank">
         <option value="risk_adjusted" selected>gain régulier (défaut)</option>
@@ -957,9 +982,15 @@ vertical-align:-2px;margin-right:7px}
   <div class="scroll"><table>
     <thead><tr><th>Collection</th><th class="num">Sorties</th>
       <th class="num">Probabilité</th><th class="num">Entrées</th>
+      <th class="num">Seuil FN</th>
       <th class="num">Requêtes</th><th></th></tr></thead>
     <tbody id="liste"><tr><td colspan="6" class="muted">chargement…</td></tr></tbody>
   </table></div>
+  <p class="muted"><b>Seuil FN</b> : moyenne de float d'entrée maximale qui
+  garde la sortie en Factory New. Il se lit à l'envers de l'intuition —
+  <b>plus il est haut, moins les entrées doivent être bonnes</b>. Au-dessus de
+  0,300 le Factory New s'obtient sans trier ; en dessous il faut inspecter les
+  annonces une par une. Ce chiffre ne coûte aucune requête.</p>
   <p class="muted">La colonne <b>Requêtes</b> est le coût CSFloat du plan.
   À 10 requêtes/minute, comptez environ ce nombre divisé par 10 en minutes.
   Le quota est limité sur une fenêtre longue : enchaînez sans excès.</p>
@@ -1028,6 +1059,40 @@ vertical-align:-2px;margin-right:7px}
 
 <script>
 const $ = s => document.querySelector(s);
+// --- Profitabilite ----------------------------------------------------------
+// Convention des guides et des calculateurs : 1.0 est le POINT MORT, pas le
+// profit. Un contrat annonce "a 40 %" rend 40 centimes par euro engage.
+// Afficher un rendement de +18 % a cote d'une profitabilite de 118 % sans les
+// distinguer conduit a lire l'un pour l'autre.
+
+const SEUIL_PROFITABLE = 1.0;
+
+function profClasse(p) {
+  return (p || 0) >= SEUIL_PROFITABLE ? 'go' : 'no';
+}
+
+function profTexte(p) {
+  return Math.round((p || 0) * 100) + '%';
+}
+
+// Jauge bornee a 200 % : au-dela l'echelle ecraserait tout le reste.
+function jauge(p) {
+  const pct = Math.min(100, ((p || 0) / 2) * 100);
+  const cls = profClasse(p) === 'go' ? '' : ' class="no"';
+  return '<div class="jauge"><i' + cls + ' style="width:' + pct + '%"></i></div>';
+}
+
+// Le seuil Factory New se lit a l'envers de l'intuition : PLUS il est haut,
+// MOINS les entrees doivent etre bonnes.
+function seuilFN(v) {
+  if (!v) return '<span class="seuil dur">—</span>';
+  const facile = v >= 0.30;
+  const titre = facile
+    ? 'Factory New atteint sans trier les annonces'
+    : 'il faut trier les floats un par un';
+  return '<span class="seuil ' + (facile ? 'facile' : 'dur') + '" title="' +
+    titre + '">' + v.toFixed(3) + '</span>';
+}
 
 function banniere(texte, erreur) {
   const b = $('#banniere');
@@ -1075,6 +1140,7 @@ function dessiner() {
         ? '<span class="tag">1 — certain</span>' : c.outcomes}</td>
       <td class="num">${(100 / c.outcomes).toFixed(0)}%</td>
       <td class="num">${c.inputs}</td>
+      <td class="num">${seuilFN(c.fn_threshold)}</td>
       <td class="num">${c.requests}</td>
       <td><button data-run="${c.id}">Calculer</button></td>
     </tr>`).join('');
@@ -1191,8 +1257,11 @@ function afficher(d) {
     <div class="kpi"><div class="lab">Revente nette</div><div class="val">${p.net.toFixed(2)}</div></div>
     <div class="kpi"><div class="lab">Profit</div>
       <div class="val ${cls}">${p.profit >= 0 ? '+' : ''}${p.profit.toFixed(2)}</div></div>
-    <div class="kpi"><div class="lab">Rendement</div>
-      <div class="val ${cls}">${(p.roi * 100).toFixed(1)}%</div></div>
+    <div class="kpi"><div class="lab">Profitabilité</div>
+      <div class="val big prof ${profClasse(p.profitability)}">${
+        profTexte(p.profitability)}</div>
+      ${jauge(p.profitability)}
+      <div class="lab">100 % = point mort</div></div>
   </div>
   ${avert.join('')}
   <div class="card">
@@ -1279,7 +1348,12 @@ function dessinerBatch(b) {
   const pct = Math.round(b.progress * 100);
   const fini = b.state === 'finished' || b.state === 'stopped';
 
-  const classes = trier(b.results, $('#bat-rank').value,
+  // Filtrer AVANT de classer : un contrat sous le point mort n'a pas a
+  // occuper une place dans un classement de candidats.
+  const retenus = $('#bat-profitables').checked
+    ? b.results.filter(x => (x.profitability || 0) >= SEUIL_PROFITABLE)
+    : b.results;
+  const classes = trier(retenus, $('#bat-rank').value,
     x => ({gain: x.profit, roi: x.roi, win: x.win_probability || 0,
            stdev: x.stdev || 0.01}));
   const lignes = classes.map(x => `<tr>
@@ -1289,7 +1363,8 @@ function dessinerBatch(b) {
     <td class="num">${x.cost.toFixed(2)}</td>
     <td class="num ${x.profit >= 0 ? 'pos' : 'neg'}">${
       x.profit >= 0 ? '+' : ''}${x.profit.toFixed(2)}</td>
-    <td class="num ${x.profit >= 0 ? 'pos' : 'neg'}">${(x.roi * 100).toFixed(1)}%</td>
+    <td class="num prof ${profClasse(x.profitability)}">${
+      profTexte(x.profitability)}</td>
     <td class="num">${((x.win_probability || 0) * 100).toFixed(0)}%</td>
     <td><button class="ghost sm" data-voir="${x.plan_id}">Voir</button>
         <button class="sm" data-follow="${x.plan_id}">Suivre</button></td></tr>`).join('');
@@ -1306,10 +1381,11 @@ function dessinerBatch(b) {
     ${lignes ? `<div class="scroll"><table>
       <thead><tr><th>Collection</th><th class="num">Sorties</th>
         <th class="num">Coût</th><th class="num">Profit</th>
-        <th class="num">Rendement</th><th class="num">P(gain)</th>
+        <th class="num">Profitabilité</th><th class="num">P(gain)</th>
         <th></th></tr></thead>
       <tbody>${lignes}</tbody></table></div>
-      <p class="muted">Classé par ${$('#bat-rank').selectedOptions[0].textContent}.
+      <p class="muted">${classes.length} sur ${b.results.length} affichés.
+      Classé par ${$('#bat-rank').selectedOptions[0].textContent}.
       Montants en ${b.currency}. <b>P(gain)</b> est la probabilité que le tirage
       rapporte plus que les entrées n’ont coûté.</p>`
       : '<p class="muted">Aucun résultat pour l\u2019instant.</p>'}
@@ -1631,6 +1707,9 @@ function invDessiner() {
 
 $('#inv-rank').addEventListener('change', invDessiner);
 $('#bat-rank').addEventListener('change', () => {
+  if (dernierBatch) dessinerBatch(dernierBatch);
+});
+$('#bat-profitables').addEventListener('change', () => {
   if (dernierBatch) dessinerBatch(dernierBatch);
 });
 $('#inv-rarity').addEventListener('change', () => invApercu(false));
