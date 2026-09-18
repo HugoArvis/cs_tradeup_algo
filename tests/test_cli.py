@@ -9,6 +9,9 @@ resultats.
 
 from __future__ import annotations
 
+import types
+from unittest import mock
+
 import pytest
 
 from tradeup import cli
@@ -241,3 +244,42 @@ def test_le_rejet_donne_les_deux_conventions():
     motif = " ".join(screen.last_reasons)
     assert "ROI" in motif and "profitabilite" in motif
     assert "40%" in motif  # le contrat rend 40 centimes par euro
+
+
+def test_un_429_steam_nest_pas_annonce_comme_un_quota_csfloat(capsys):
+    """Un scan interroge les deux marches : le message doit nommer le bon.
+
+    Annoncer "quota CSFloat" sur un 429 de Steam envoie chercher une cle API
+    la ou il fallait attendre et baisser le debit.
+    """
+    from tradeup.pricing.http import RateLimited
+
+    def echoue(_args):
+        raise RateLimited(
+            "429 persistant sur https://steamcommunity.com/market/priceoverview/"
+        )
+
+    faux = types.SimpleNamespace(func=echoue, verbose=False)
+    with mock.patch("tradeup.cli.build_parser") as bp:
+        bp.return_value.parse_args.return_value = faux
+        code = cli.main([])
+
+    err = capsys.readouterr().err
+    assert code == 3
+    assert "Steam" in err and "CSFloat" not in err
+
+
+def test_un_429_csfloat_garde_son_message(capsys):
+    from tradeup.pricing.http import RateLimited
+
+    def echoue(_args):
+        raise RateLimited("429 persistant sur https://csfloat.com/api/v1/listings")
+
+    faux = types.SimpleNamespace(func=echoue, verbose=False)
+    with mock.patch("tradeup.cli.build_parser") as bp:
+        bp.return_value.parse_args.return_value = faux
+        code = cli.main([])
+
+    err = capsys.readouterr().err
+    assert code == 3
+    assert "CSFloat" in err

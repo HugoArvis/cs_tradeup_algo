@@ -19,8 +19,10 @@ from dataclasses import dataclass, field
 
 from .db import SkinDatabase
 from .ev import InputItem, TradeUpResult, evaluate
+from .fees import STEAM, FeeModel
 from .generator import InputOption, cheapest_unique_selection, options_from_listings
 from .models import Collection, Rarity
+from .pricing.base import PriceSource, Quote
 from .pricing.csfloat import CSFloat
 from .wear import TRADEUP_INPUT_COUNT, wear_breakpoints, wear_of
 
@@ -39,13 +41,25 @@ class CSFloatPricer:
     """
 
     def __init__(self, source: CSFloat, *, sell_fee: float = 0.02,
-                 safety_margin: float = 0.05, listings_limit: int = 50):
+                 safety_margin: float = 0.05, listings_limit: int = 50,
+                 sell_source: PriceSource | None = None,
+                 sell_fees: FeeModel | None = None):
         self.source = source
         self.sell_fee = sell_fee
         self.safety_margin = safety_margin
         self.listings_limit = listings_limit
         self._book: dict[str, list[tuple[float, float]]] = {}  # nom -> [(float, prix)]
         self._stats: dict[str, dict | None] = {}
+        # Ou la SORTIE se revend. Par defaut nulle part ailleurs qu'ici : le
+        # prix CSFloat moins 2 %. Mais un contrat ne se juge pas sur ce qu'il
+        # vaut, il se juge sur ce qu'on ENCAISSE, et les deux marches ne
+        # prelevent pas la meme chose. Steam prend ~13 % du prix affiche, avec
+        # un plancher de 0.01 PAR FRAIS qui ecrase les petits montants : 66 %
+        # sur un objet a 0.03, 28.6 % a 0.07, contre 12-13 % au-dela de 0.25.
+        # A ces montants-la, les frais ne rognent pas le gain, ils le mangent.
+        self.sell_source = sell_source
+        self.sell_fees = sell_fees or STEAM
+        self._ventes: dict[str, Quote | None] = {}
 
     def _listings(self, name: str) -> list[tuple[float, float]]:
         """Carnet nettoye, utilisable pour valoriser une sortie de trade-up.
@@ -117,16 +131,51 @@ class CSFloatPricer:
             return None
         return min(prix for _, prix in book)
 
+    def _quote_de_vente(self, name: str) -> Quote | None:
+        """Cotation du marche de REVENTE, gardee en memoire.
+
+        Elle porte aussi le volume : la liquidite arrive donc sans requete
+        supplementaire, la ou l'interroger sur CSFloat coute un appel de plus.
+        """
+        if name not in self._ventes:
+            try:
+                self._ventes[name] = self.sell_source.fetch(name)
+            except Exception:  # noqa: BLE001 - une sortie non cotee vaut None
+                log.warning("Prix de revente indisponible pour %s", name)
+                self._ventes[name] = None
+        return self._ventes[name]
+
+    def _net_ailleurs(self, name: str) -> float | None:
+        q = self._quote_de_vente(name)
+        if q is None:
+            return None
+        affiche = q.sell_reference()
+        if affiche is None:
+            return None
+        # `net_from_sale` du modele Steam reproduit l'arrondi reel, plancher de
+        # 0.01 par frais compris. Un pourcentage moyen ne le remplacerait pas :
+        # c'est precisement en bas de l'echelle que l'ecart devient decisif.
+        return self.sell_fees.net_from_sale(affiche) * (1 - self.safety_margin)
+
     def sell_net_at_float(
         self, skin, wear, stattrak: bool, float_value: float
     ) -> float | None:
+        # Steam n'affiche pas le float, donc ne le price pas : dans un meme
+        # palier, deux exemplaires s'y vendent au meme prix. Quand la revente
+        # passe par la, viser un float tres bas ne rapporte rien de plus -- le
+        # palier d'usure est tout ce qui compte.
+        if self.sell_source is not None:
+            return self.sell_net(skin, wear, stattrak)
         p = self.price_at_float(skin.market_hash_name(wear, stattrak), float_value)
         if p is None:
             return None
         return p * (1 - self.sell_fee) * (1 - self.safety_margin)
 
     def sell_net(self, skin, wear, stattrak=False) -> float | None:
-        p = self._lowest(skin.market_hash_name(wear, stattrak))
+        name = skin.market_hash_name(wear, stattrak)
+        if self.sell_source is not None:
+            return self._net_ailleurs(name)
+        p = self._lowest(name)
         if p is None:
             return None
         return p * (1 - self.sell_fee) * (1 - self.safety_margin)
@@ -137,6 +186,23 @@ class CSFloatPricer:
     def volume(self, skin, wear, stattrak=False) -> int | None:
         stats = self.sales_stats(skin.market_hash_name(wear, stattrak))
         return stats["ventes_jour"] if stats else None
+
+    def _stats_du_marche_de_vente(self, name: str) -> dict | None:
+        """Liquidite lue sur le marche ou l'on vendra, pas sur l'autre.
+
+        Les volumes des deux marches n'ont rien a voir : mesure sur des sorties
+        Mil-Spec, 98 et 83 ventes par jour sur Steam contre 8 et 10 sur
+        CSFloat. Annoncer un delai de revente d'apres le mauvais carnet le
+        surestime d'un ordre de grandeur.
+        """
+        q = self._quote_de_vente(name)
+        if q is None or q.volume is None:
+            return None
+        return {
+            "ventes_jour": q.volume,
+            "prix_median": q.median_price,
+            "ventes_observees": q.volume,
+        }
 
     def sales_stats(self, name: str) -> dict | None:
         """Liquidite reelle : ventes par jour et prix median effectivement paye.
@@ -151,6 +217,8 @@ class CSFloatPricer:
         souvent superieur au prix demande le plus bas, donc l'utiliser rendrait
         le modele plus optimiste. Il sert a informer, pas a calculer.
         """
+        if self.sell_source is not None:
+            return self._stats_du_marche_de_vente(name)
         if name in self._stats:
             return self._stats[name]
         try:
@@ -313,12 +381,20 @@ def build_plan(
     safety_margin: float = 0.05,
     sell_fee: float = 0.02,
     float_margin: float = 0.005,
+    sell_source: PriceSource | None = None,
+    sell_fees: FeeModel | None = None,
 ) -> Plan | None:
     """Construit le meilleur panier realisable avec ce qui est en vente.
 
     Balaye les paliers d'usure de la sortie (l'EV est constante par morceaux) et,
     pour chacun, cherche les 10 annonces les moins cheres dont la moyenne de
     float tient sous la frontiere.
+
+    `sell_source` designe le marche de REVENTE de la sortie. Sans lui, la
+    sortie est valorisee au prix CSFloat moins 2 % -- ce qui suppose qu'on
+    revend la ou l'on a achete. Avec lui (typiquement Steam), la sortie est
+    cotee sur ce marche et nette de SES frais : c'est la seule facon de dire si
+    un contrat rapporte, puisque c'est ce qu'on encaisse qui compte.
 
     `float_margin` protege d'un risque different de celui du scan Steam. Ici les
     floats sont connus : il n'y a pas de tirage. Mais les 10 annonces sont des
@@ -346,7 +422,8 @@ def build_plan(
         log.info("Seulement %d offres pour %s : insuffisant", len(toutes), collection.name)
         return None
 
-    pricer = CSFloatPricer(source, sell_fee=sell_fee, safety_margin=safety_margin)
+    pricer = CSFloatPricer(source, sell_fee=sell_fee, safety_margin=safety_margin,
+                           sell_source=sell_source, sell_fees=sell_fees)
     outcomes_map = {collection.id: outcomes}
 
     meilleur: Plan | None = None
@@ -410,8 +487,15 @@ def _breakpoints_avec_annonces(
     juste sous une annonce chere permet de se vendre a son prix. Ces points-la
     doivent donc etre explores, sinon l'optimiseur ne verra jamais l'interet de
     descendre en float.
+
+    Cela n'a de sens que si la revente se fait la ou le float est price. Quand
+    la sortie se vend sur Steam, le prix ne bouge pas a l'interieur d'un
+    palier : les seuls points utiles sont les frontieres d'usure, et coter les
+    annonces CSFloat des sorties devient une depense de quota sans objet.
     """
     points = set(wear_breakpoints(outcomes)[1:])
+    if pricer.sell_source is not None:
+        return sorted(points)
 
     for skin in outcomes:
         for wear in skin.available_wears():

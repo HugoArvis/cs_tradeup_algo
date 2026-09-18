@@ -1222,16 +1222,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         return args.func(args)
-    except RateLimited:
+    except RateLimited as exc:
         # Erreur la plus frequente a l'usage : un traceback Python n'aide
         # personne, et la seule bonne reaction est d'attendre.
-        print(
-            "\nQuota CSFloat epuise.\n"
-            "  CSFloat limite sur une fenetre longue, pas seulement par minute.\n"
-            "  Relancer tout de suite ne fera qu'aggraver : attends 5 a 10 min.\n"
-            "  Si ca se reproduit, baisse le debit : --rate 5",
-            file=sys.stderr,
-        )
+        #
+        # Encore faut-il attendre le bon guichet. Un scan interroge Steam ET
+        # CSFloat ; annoncer "quota CSFloat" sur un 429 de Steam envoie
+        # chercher une cle API la ou il fallait juste baisser le debit.
+        if "steamcommunity" in str(exc):
+            print(
+                "\nSteam a ferme la porte (429).\n"
+                "  Steam tolere environ 15 requetes par minute, et compte aussi\n"
+                "  sur une fenetre plus longue. Attends 10 a 15 min.\n"
+                "  Les prix deja obtenus sont en cache : la reprise repart de la.\n"
+                "  Pour une longue serie, descends a --rate 8.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "\nQuota CSFloat epuise.\n"
+                "  CSFloat limite sur une fenetre longue, pas seulement par minute.\n"
+                "  Relancer tout de suite ne fera qu'aggraver : attends 5 a 10 min.\n"
+                "  Si ca se reproduit, baisse le debit : --rate 5",
+                file=sys.stderr,
+            )
         return 3
     except FileNotFoundError as exc:
         print(exc, file=sys.stderr)

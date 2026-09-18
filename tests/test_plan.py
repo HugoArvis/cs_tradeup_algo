@@ -142,3 +142,99 @@ def test_le_plan_porte_la_rarete_dentree():
 
     assert "rarity" in Plan.__dataclass_fields__
     assert Plan.__dataclass_fields__["rarity"].default is Rarity.MIL_SPEC
+
+
+# --- Frais du marche de REVENTE ----------------------------------------------
+# On achete sur CSFloat et on revend sur Steam. Ce n'est pas le prix d'une
+# sortie qui decide d'un contrat, c'est ce qu'on encaisse : les frais Steam
+# ont un plancher de 0.01 PAR FRAIS, ce qui devore les petits montants.
+
+
+class FauxMarcheDeVente:
+    """Source de prix minimale, pour verifier le chemin de valorisation."""
+
+    name = "faux"
+
+    def __init__(self, prix: dict[str, float], volume: int | None = 50):
+        self.prix = prix
+        self.volume = volume
+        self.appels: list[str] = []
+
+    def fetch(self, market_hash_name: str, *, use_cache: bool = True):
+        from tradeup.pricing.base import Quote
+
+        self.appels.append(market_hash_name)
+        p = self.prix.get(market_hash_name)
+        if p is None:
+            return None
+        return Quote(market_hash_name=market_hash_name, source="faux",
+                     lowest_price=p, median_price=p, volume=self.volume,
+                     currency="USD")
+
+
+def _pricer(prix_steam, **kw):
+    from tradeup.fees import STEAM
+    from tradeup.plan import CSFloatPricer
+
+    marche = FauxMarcheDeVente(prix_steam, **kw)
+    return CSFloatPricer(source=None, safety_margin=0.0,
+                         sell_source=marche, sell_fees=STEAM), marche
+
+
+def test_le_plancher_de_frais_steam_devore_les_petits_montants():
+    """Regle du domaine : 0.01 minimum PAR frais, il y en a deux.
+
+    A 0.03 le vendeur touche 0.01 -- 66 % de frais. Un modele a taux fixe
+    annoncerait 0.026 et rendrait rentable un contrat qui perd.
+    """
+    nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
+    pricer, _ = _pricer({nom: 0.03})
+    assert pricer.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(0.01)
+
+    pricer, _ = _pricer({nom: 0.07})
+    # 0.05 net : 28.6 % de frais, tres loin des 13 % du haut de l'echelle.
+    assert pricer.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(0.05)
+
+    pricer, _ = _pricer({nom: 10.0})
+    net = pricer.sell_net(SKIN, Wear.FACTORY_NEW)
+    assert 0.86 < net / 10.0 < 0.88  # regime normal : ~13 %
+
+
+def test_une_sortie_non_cotee_sur_le_marche_de_vente_ne_vaut_rien():
+    """Mieux vaut une sortie sans prix qu'un prix invente."""
+    pricer, _ = _pricer({})
+    assert pricer.sell_net(SKIN, Wear.FACTORY_NEW) is None
+
+
+def test_le_float_ne_change_pas_le_prix_quand_on_revend_sur_steam():
+    """Steam n'affiche pas le float, donc ne le price pas.
+
+    Viser 0.001 plutot que 0.06 dans un meme palier ne rapporte rien de plus :
+    le modele ne doit pas payer une prime pour un avantage inexistant.
+    """
+    nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
+    pricer, _ = _pricer({nom: 10.0})
+    bas = pricer.sell_net_at_float(SKIN, Wear.FACTORY_NEW, False, 0.001)
+    haut = pricer.sell_net_at_float(SKIN, Wear.FACTORY_NEW, False, 0.060)
+    assert bas == haut == pricer.sell_net(SKIN, Wear.FACTORY_NEW)
+
+
+def test_la_liquidite_est_lue_sur_le_marche_de_vente_sans_requete_de_plus():
+    """Le volume arrive avec la cotation ; l'interroger a part coute un appel."""
+    nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
+    pricer, marche = _pricer({nom: 10.0}, volume=98)
+
+    pricer.sell_net(SKIN, Wear.FACTORY_NEW)
+    stats = pricer.sales_stats(nom)
+
+    assert stats["ventes_jour"] == 98
+    assert marche.appels == [nom]  # une seule cotation pour prix ET volume
+
+
+def test_sans_marche_de_vente_le_comportement_dorigine_est_conserve():
+    """Le mode historique -- revendre sur CSFloat -- reste disponible."""
+    from tradeup.plan import CSFloatPricer
+
+    pricer = CSFloatPricer(source=None, sell_fee=0.02, safety_margin=0.0)
+    pricer._book[SKIN.market_hash_name(Wear.FACTORY_NEW)] = [(0.01, 10.0)]
+    assert pricer.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(9.8)
