@@ -58,7 +58,7 @@ Le raccourci `tradeup` n'est pas dans le `PATH` : passer par `python -m tradeup.
 
 | | `scan` | `plan` |
 |---|---|---|
-| Source | Steam ou CSFloat (`MarketPricer`) | CSFloat (`plan.CSFloatPricer`) |
+| Source | Steam ou CSFloat (`MarketPricer`) | achat CSFloat, revente Steam (`plan.CSFloatPricer`) |
 | Prix | un par palier d'usure | annonces réelles |
 | Float | supposé (`--float-pct`) | exact |
 | Sélection | avec répétition | 0/1, une annonce est unique |
@@ -149,6 +149,18 @@ fenêtre est un paramètre de requête, elle ne coûte aucun quota.
 appel `/history/{nom}/graph` qui **double** la consommation de quota. Sans lui,
 `--min-volume` ne filtre rien et la capacité d'exécution reste « inconnue » —
 silencieusement.
+
+**Une sortie se valorise sur le marche ou on la VEND, nette de ses frais.**
+`plan` achète sur CSFloat et revend sur Steam : `CSFloatPricer` reçoit un
+`sell_source` et son `FeeModel`. Le valoriser au prix CSFloat moins 2 %
+supposait qu'on revend là où l'on a acheté — mesuré sur les 383 sorties
+Mil-Spec cotées, Steam prélève **13,2 %** en moyenne et **23,2 %** entre 0,05
+et 0,10 €. Deux conséquences que le code tire de lui-même : `sell_net_at_float`
+cesse d'être sensible au float (Steam ne le price pas, viser 0,001 plutôt que
+0,06 n'achète rien), et les paliers de prix CSFloat des sorties sortent de
+`_breakpoints_avec_annonces` — les coter devenait une dépense de quota sans
+objet. Les deux côtés sont cotés en **USD** : mélanger les devises donne un
+nombre qui ressemble à un profit sans en être un.
 
 **Aucune prime de bas float dans le calcul** — elle existe (+40 %) mais ce sont
 des prix demandés, rien ne dit qu'ils se concluent. Retenir la moins chère
