@@ -380,3 +380,66 @@ def test_le_balayage_dit_qu_il_a_travaille_meme_sans_resultat(app):
 
     assert d["results"] == []
     assert d["computed"] == 1 and d["rejected"] == 1
+
+
+# --- Devise affichee ---------------------------------------------------------
+
+
+def test_la_devise_par_defaut_ne_se_fait_pas_passer_pour_celle_du_compte(app):
+    """USD est a la fois une reponse possible et la valeur par defaut.
+
+    Tant que le compte n'a pas repondu, la page ne doit pas presenter USD
+    comme "la devise de votre compte" : un utilisateur en euros lirait tous
+    les montants a cote.
+    """
+    assert app.currency == "USD"
+    assert app.currency_known is False
+
+
+def test_la_devise_du_compte_est_lue_et_convertit_les_montants(app, monkeypatch):
+    class FauxCSFloat:
+        def __init__(self, *a, **k):
+            pass
+
+        def account_currency(self):
+            return "EUR"
+
+        def usd_rate(self, devise):
+            assert devise == "EUR"
+            return 0.92
+
+    monkeypatch.setattr("tradeup.web.CSFloat", FauxCSFloat)
+    app.load_currency()
+
+    assert app.currency == "EUR" and app.currency_known is True
+    assert app.conv(10.0) == 9.20
+
+
+def test_une_devise_illisible_reste_signalee_comme_inconnue(app, monkeypatch):
+    """Le confort qu'est la conversion ne doit pas se muer en affirmation."""
+    class CSFloatMuet:
+        def __init__(self, *a, **k):
+            pass
+
+        def account_currency(self):
+            raise RuntimeError("API muette")
+
+    monkeypatch.setattr("tradeup.web.CSFloat", CSFloatMuet)
+    app.load_currency()
+
+    assert app.currency == "USD" and app.currency_known is False
+    assert app.conv(10.0) == 10.0
+
+
+def test_un_compte_en_dollars_est_une_reponse_pas_un_defaut(app, monkeypatch):
+    class CSFloatUSD:
+        def __init__(self, *a, **k):
+            pass
+
+        def account_currency(self):
+            return "USD"
+
+    monkeypatch.setattr("tradeup.web.CSFloat", CSFloatUSD)
+    app.load_currency()
+
+    assert app.currency == "USD" and app.currency_known is True

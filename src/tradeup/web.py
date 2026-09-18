@@ -169,6 +169,10 @@ class App:
         self.currency = "USD"
         self.rate_usd = 1.0
         self._devise_chargee = False
+        # "USD" est a la fois une reponse et une valeur par defaut. Sans ce
+        # drapeau, une lecture ratee est indiscernable d'un compte en dollars,
+        # et la page affirme une devise qu'elle n'a jamais verifiee.
+        self._devise_lue = False
         # Le code evolue, le serveur non : un processus lance avant une
         # correction continue de servir l'ancienne logique. Afficher son heure
         # de demarrage rend ce piege visible au lieu de le laisser deviner.
@@ -182,11 +186,18 @@ class App:
         try:
             source = CSFloat(self._api_key, calls_per_minute=self.rate)
             devise = source.account_currency()
-            if devise and devise != "USD":
-                self.rate_usd = source.usd_rate(devise)
-                self.currency = devise
+            if devise:
+                self._devise_lue = True
+                if devise != "USD":
+                    self.rate_usd = source.usd_rate(devise)
+                    self.currency = devise
         except Exception:  # noqa: BLE001 - la conversion est un confort
             log.warning("Devise du compte indisponible, affichage en USD")
+
+    @property
+    def currency_known(self) -> bool:
+        """La devise affichee vient-elle du compte, ou du defaut ?"""
+        return self._devise_lue
 
     def conv(self, montant_usd: float) -> float:
         return round(montant_usd * self.rate_usd, 2)
@@ -682,9 +693,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(self.app.job_payload(job))
         elif route.path == "/api/status":
+            # Deux requetes CSFloat au plus, une fois par processus, et elles
+            # ne cotent aucun objet. C'est le prix d'une en-tete qui dit vrai :
+            # annoncer USD a un compte en euros fausse toute lecture des
+            # montants, et le decalage ne se voit nulle part ailleurs.
+            self.app.load_currency()
             self._json({
                 "started_at": self.app.started_at,
                 "currency": self.app.currency,
+                "currency_known": self.app.currency_known,
             })
         elif route.path.startswith("/api/batch/"):
             batch = self.app.batches.get(route.path.rsplit("/", 1)[-1])
@@ -950,7 +967,7 @@ vertical-align:-2px;margin-right:7px}
 
 <h1>Assistant trade-up CS2</h1>
 <div class="sub">Application locale &middot; montants en
-  <b id="devise">USD</b> (devise de votre compte CSFloat)
+  <b id="devise">…</b> <span id="devise-note"></span>
   &middot; serveur démarré <b id="demarrage">…</b></div>
 
 <div class="tabs">
@@ -1439,6 +1456,11 @@ fetch('/api/status').then(x => x.json()).then(d => {
     new Date(d.started_at * 1000).toLocaleTimeString('fr-FR',
       {hour: '2-digit', minute: '2-digit'});
   if (d.currency) $('#devise').textContent = d.currency;
+  // Une lecture ratee laisse "USD" par defaut : le dire, plutot que de le
+  // presenter comme la devise du compte.
+  $('#devise-note').textContent = d.currency_known
+    ? '(devise de votre compte CSFloat)'
+    : '(devise du compte illisible — aucune conversion appliquée)';
 }).catch(() => {});
 
 // --- Mon inventaire ---------------------------------------------------------
