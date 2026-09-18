@@ -85,19 +85,35 @@ La sélection sous contrainte de float est une DP sur frontière de Pareto
 
 Chacune vient d'un bug mesuré ; les tests les verrouillent.
 
-**Probabilité d'une sortie** : `P(s ∈ C) = n_C / Σ n_C' × k_C'`. Une collection
-à peu de sorties est globalement *moins* probable, pas plus.
+**Probabilité d'une sortie** : on tire un ticket (une entrée), ce qui désigne
+une collection, puis un skin uniformément dedans.
 
-**Incertitude non levée sur le MULTI-collection.** Les sources publiques se
-contredisent : certaines donnent `P(collection) = n_C / 10` — proportionnel aux
-seules entrées — quand celle-ci pondère aussi par le nombre de sorties. Sur
-« 8 Mirage (2 sorties) + 2 Dust 2 (1 sortie) », la première donne 80/20, la
-nôtre 89/11.
+    P(collection C)       = n_C / N
+    P(un skin donné de C) = n_C / (N × k_C)
 
-Les deux formules **coïncident exactement en mono-collection** (toutes deux
-donnent `1/k`), ce qui met hors de cause tout ce que le projet recommande
-aujourd'hui. Trancher demande une observation : noter la répartition réelle sur
-un contrat mixte exécuté, ou la comparer à un calculateur de référence.
+La part d'une collection ne dépend **que de ses entrées** : cinq entrées de The
+Bank Collection donnent 50 % de chances d'une sortie Bank, qu'elle ait deux
+sorties ou dix. Son nombre de sorties ne fait que répartir cette part — une
+collection à peu de sorties concentre la sienne, chaque skin y vaut donc plus.
+
+*Corrigé en septembre 2026*, sur l'indication d'un guide vidéo. Le projet
+pondérait auparavant la part de chaque collection par son nombre de sorties
+(`n_C / Σ n_C'×k_C'`) : sur « 9 entrées d'une collection à 2 sorties + 1 entrée
+d'une à 1 sortie », cela donnait 94,7 / 5,3 au lieu de **90 / 10** — soit la
+moitié de sa vraie part pour la collection intruse, celle qu'on ajoute justement
+pour diluer. Les deux formules coïncident exactement en mono-collection (toutes
+deux donnent `1/k`), ce qui a rendu l'erreur invisible sur tous les contrats
+recommandés jusque-là.
+
+**Une collection sans sortie sort du dénominateur.** Ses entrées sont du coût
+pur ; les compter ferait une masse totale inférieure à 1.
+
+**Profitabilité = `EV / coût`, où 1,0 est le point mort** — convention des
+guides et calculateurs publics, exposée par `TradeUpResult.profitability` et
+`GoldPlan.profitability`. Un contrat annoncé « à 40 % » rend 40 centimes par
+euro engagé : il en détruit 60. C'est `1 + roi`, mais comparer un chiffre du
+projet à celui d'une vidéo exige la même convention, sans quoi on compare 10
+à 110.
 
 **Float de sortie** : moyenne des floats **normalisés** — chaque entrée ramenée
 à `(float − min_skin) / (max_skin − min_skin)` — puis remappée sur le range du

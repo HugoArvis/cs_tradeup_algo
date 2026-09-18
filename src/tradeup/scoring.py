@@ -123,7 +123,8 @@ class Candidate:
         return (
             f"{self.label}\n"
             f"  cout {r.cost:8.2f} | EV nette {r.ev_net:8.2f} | "
-            f"profit {r.ev_profit:+7.2f} ({r.roi:+.1%})\n"
+            f"profit {r.ev_profit:+7.2f} ({r.roi:+.1%}) | "
+            f"profitabilite {r.profitability:.0%}\n"
             f"  ecart-type {r.stdev:7.2f} | score risque {self.score:6.2f} | "
             f"P(profit) {r.profit_probability:.1%}\n"
             f"  float moyen d'entree {r.avg_input_float:.4f} | "

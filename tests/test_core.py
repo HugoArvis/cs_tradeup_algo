@@ -90,11 +90,13 @@ def test_mono_collection_probabilites_uniformes():
     assert sum(probs.values()) == pytest.approx(1.0)
 
 
-def test_melange_penalise_la_collection_a_peu_de_sorties():
+def test_la_part_dune_collection_ne_depend_que_de_ses_entrees():
     """5+5 entrees, mais 2 sorties d'un cote et 10 de l'autre.
 
-    Denominateur = 5*2 + 5*10 = 60. Chaque sortie vaut 5/60, donc la petite
-    collection ne pese que 2*5/60 = 16.7 % malgre la moitie des entrees.
+    Chaque collection pese la MOITIE, puisqu'elle fournit la moitie des
+    entrees. Son nombre de sorties ne change pas sa part : il ne fait que
+    repartir cette part entre ses skins -- 25 % par sortie a gauche, 5 % a
+    droite.
     """
     petite = [make_skin(f"p{i}", Rarity.RESTRICTED, collection="col_a") for i in range(2)]
     grande = [make_skin(f"g{i}", Rarity.RESTRICTED, collection="col_b") for i in range(10)]
@@ -103,9 +105,11 @@ def test_melange_penalise_la_collection_a_peu_de_sorties():
         {"col_a": 5, "col_b": 5}, {"col_a": petite, "col_b": grande}
     )
     assert sum(probs.values()) == pytest.approx(1.0)
-    assert sum(probs[s.key] for s in petite) == pytest.approx(2 / 12)
-    assert sum(probs[s.key] for s in grande) == pytest.approx(10 / 12)
-    assert probs[petite[0].key] == pytest.approx(probs[grande[0].key])
+    assert sum(probs[s.key] for s in petite) == pytest.approx(0.5)
+    assert sum(probs[s.key] for s in grande) == pytest.approx(0.5)
+    # Une collection a peu de sorties concentre sa part : chaque skin vaut plus.
+    assert probs[petite[0].key] == pytest.approx(0.25)
+    assert probs[grande[0].key] == pytest.approx(0.05)
 
 
 def test_collection_sans_sortie_ne_contribue_rien():
@@ -380,3 +384,36 @@ def test_le_classement_par_securite_ne_depend_pas_dun_nombre_magique():
     enorme = _resultat(0.10, 5000.0)
     assert score(enorme, Ranking.SAFETY) > score(sur, Ranking.SAFETY)  # le defaut
     assert sort_key(sur, Ranking.SAFETY) > sort_key(enorme, Ranking.SAFETY)
+
+
+def test_la_profitabilite_suit_la_convention_des_guides():
+    """1.0 = point mort, pas le profit.
+
+    Les guides et calculateurs publics annoncent "110 %" pour un contrat qui
+    rapporte 10 %. Comparer un chiffre du projet a un chiffre d'une video exige
+    la meme convention, sans quoi on compare 10 a 110.
+    """
+    from tradeup.ev import Outcome, TradeUpResult
+    from tradeup.models import Wear
+
+    skin = make_skin("s", Rarity.RESTRICTED)
+
+    def contrat(net, cout):
+        return TradeUpResult(
+            outcomes=(Outcome(skin=skin, float_value=0.1, wear=Wear.FACTORY_NEW,
+                              probability=1.0, net_value=net, priced=True),),
+            inputs=(), cost=cout, avg_input_float=0.1, avg_normalized=0.1,
+            stattrak=False, unpriced_probability=0.0)
+
+    point_mort = contrat(100.0, 100.0)
+    assert point_mort.profitability == pytest.approx(1.0)
+    assert point_mort.roi == pytest.approx(0.0)
+
+    bon = contrat(110.0, 100.0)
+    assert bon.profitability == pytest.approx(1.10)
+    assert bon.profitability == pytest.approx(1 + bon.roi)
+
+    # "Un tradeup a 40 % n'en vaut pas la peine" : il rend 40 centimes par euro.
+    mauvais = contrat(40.0, 100.0)
+    assert mauvais.profitability == pytest.approx(0.40)
+    assert mauvais.roi == pytest.approx(-0.60)

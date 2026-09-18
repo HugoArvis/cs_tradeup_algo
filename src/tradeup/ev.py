@@ -2,17 +2,22 @@
 
 Distribution des sorties
 ------------------------
-Chaque objet d'entree depose un "ticket" pour SA collection. Le tirage se fait
-uniformement sur l'ensemble des paires (ticket, sortie possible de sa
-collection). Donc, pour une collection C fournissant ``n_C`` entrees et
-``k_C`` skins de sortie a la rarete cible :
+Chaque objet d'entree depose un "ticket" pour SA collection. On tire un ticket,
+ce qui designe une collection, puis un skin uniformement dans cette collection.
+Pour une collection C fournissant ``n_C`` entrees sur ``N`` et ``k_C`` skins de
+sortie a la rarete cible :
 
-    P(un skin de sortie donne de C) = n_C / somme_sur_C'( n_C' * k_C' )
+    P(collection C)      = n_C / N
+    P(un skin donne de C) = n_C / (N * k_C)
 
-Consequence contre-intuitive mais correcte : une collection avec PEU de sorties
-possibles est globalement MOINS probable qu'une collection avec beaucoup de
-sorties, a nombre d'entrees egal. Et une collection sans sortie a la rarete
-cible ne contribue rien : ses entrees sont du cout pur.
+La part d'une collection ne depend donc QUE de ses entrees : cinq entrees de
+The Bank Collection donnent 50 % de chances d'une sortie Bank, qu'elle ait deux
+sorties ou dix. Son nombre de sorties ne fait que repartir cette part -- une
+collection a peu de sorties concentre la sienne, chaque skin y vaut donc plus.
+
+Une collection sans sortie a la rarete cible ne contribue rien : ses entrees
+sont du cout pur, et elles sortent du denominateur pour que la masse totale
+reste une probabilite.
 """
 
 from __future__ import annotations
@@ -123,6 +128,19 @@ class TradeUpResult:
     def roi(self) -> float:
         return self.ev_profit / self.cost if self.cost > 0 else 0.0
 
+    @property
+    def profitability(self) -> float:
+        """Rendement brut : ce que la sortie rapporte pour un euro engage.
+
+        C'est la convention des guides et des calculateurs publics, ou 1.0
+        (100 %) est le point mort et non le profit. Un contrat annonce a 40 %
+        rend 40 centimes par euro : il en detruit 60.
+
+        Vaut `1 + roi` -- deux facons de dire la meme chose, mais comparer un
+        chiffre du projet a un chiffre d'une video exige la meme convention.
+        """
+        return self.ev_net / self.cost if self.cost > 0 else 0.0
+
     # --- Risque ---
     @property
     def variance(self) -> float:
@@ -182,22 +200,47 @@ def outcome_probabilities(
 ) -> dict[str, float]:
     """Probabilite par skin de sortie (cle = `Skin.key`).
 
+    Deux etapes, dans cet ordre :
+
+        P(collection C) = n_C / N          -- N = nombre total d'entrees
+        P(skin s de C)  = P(C) / k_C       -- uniforme dans la collection tiree
+
+    Autrement dit la part d'une collection ne depend QUE de son nombre
+    d'entrees : cinq entrees de The Bank Collection donnent 50 % de chances
+    d'une sortie Bank, quel que soit le nombre de sorties qu'elle possede. Ce
+    nombre ne sert qu'a repartir cette part entre ses skins.
+
+    CORRECTION (sept. 2026). Le projet ponderait auparavant la part de chaque
+    collection par son nombre de sorties -- `n_C / somme(n_C' x k_C')`. Sur
+    "9 entrees d'une collection a 2 sorties + 1 entree d'une collection a 1
+    sortie", l'ancienne donnait 94.7 % / 5.3 % la ou la bonne donne 90 % / 10 % :
+    elle sous-estimait de moitie la collection intruse, celle qu'on ajoute
+    justement pour diluer. Les deux coincident exactement en mono-collection
+    (toutes deux donnent 1/k), ce qui explique qu'aucun contrat recommande
+    jusqu'ici n'en ait souffert.
+
     Args:
         inputs_per_collection: nombre d'entrees par identifiant de collection.
         outcomes_per_collection: skins de sortie possibles par collection.
     """
-    denominator = sum(
-        count * len(outcomes_per_collection.get(cid, ()))
-        for cid, count in inputs_per_collection.items()
-    )
-    if denominator == 0:
+    # Une collection sans sortie ne peut rien produire. Ses entrees sont du
+    # cout pur et ne portent aucune probabilite : les compter au denominateur
+    # ferait une masse totale inferieure a 1.
+    utiles = {
+        cid: n for cid, n in inputs_per_collection.items()
+        if outcomes_per_collection.get(cid)
+    }
+    total_entrees = sum(utiles.values())
+    if total_entrees == 0:
         return {}
 
     probs: dict[str, float] = {}
-    for cid, count in inputs_per_collection.items():
-        for skin in outcomes_per_collection.get(cid, ()):
+    for cid, count in utiles.items():
+        sorties = outcomes_per_collection[cid]
+        part = count / total_entrees
+        for skin in sorties:
             # Un meme skin ne peut appartenir qu'a une collection : pas de cumul.
-            probs[skin.key] = count / denominator
+            probs[skin.key] = part / len(sorties)
     return probs
 
 

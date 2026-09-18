@@ -107,6 +107,11 @@ class GoldPlan:
         return self.ev_profit / self.cost if self.cost else 0.0
 
     @property
+    def profitability(self) -> float:
+        """Rendement brut, convention des guides : 1.0 = point mort."""
+        return self.ev_net / self.cost if self.cost else 0.0
+
+    @property
     def win_probability(self) -> float:
         return sum(o.probability for o in self.outcomes
                    if o.net_value >= self.cost)
@@ -119,8 +124,9 @@ class GoldPlan:
         lignes = [
             f"{self.crate.name}  [5x {self.input_name} ({self.input_wear.label})]",
             f"  cout {self.cost:.2f} ({self.unit_cost:.2f} l'unite)  |  "
-            f"EV nette {self.ev_net:.2f}  |  profit {self.ev_profit:+.2f} "
-            f"({self.roi:+.1%})",
+            f"EV nette {self.ev_net:.2f}  |  profit {self.ev_profit:+.2f}",
+            f"  PROFITABILITE {self.profitability:.0%} "
+            f"(100 % = point mort ; au-dela on gagne en moyenne)",
             f"  {self.win_probability:.0%} de chances d'y gagner  |  "
             f"{len(self.outcomes)} golds possibles, "
             f"{self.crate.gold_probability:.1%} chacun",

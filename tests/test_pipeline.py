@@ -165,9 +165,8 @@ def test_scan_avec_melanges_explore_plus_de_recettes(db, prices):
 def test_diluer_avec_une_collection_perdante_degrade_le_contrat(db, prices):
     """Verifie la formule de probabilite sur un melange reel.
 
-    5 entrees "rentable" (2 sorties) + 5 "perdante" (1 sortie) :
-    denominateur = 5*2 + 5*1 = 15, donc la collection rentable ne pese que
-    10/15 = 66.7 % alors qu'elle fournit la moitie des entrees.
+    5 entrees "rentable" + 5 "perdante" : chaque collection pese exactement la
+    moitie, quel que soit son nombre de sorties.
     """
     recipes = [
         r for r in iter_recipes(db, Rarity.MIL_SPEC, max_collections=2)
@@ -180,7 +179,7 @@ def test_diluer_avec_une_collection_perdante_degrade_le_contrat(db, prices):
     proba_rentable = sum(
         o.probability for o in r.outcomes if o.skin.collection_id == "col_rentable"
     )
-    assert proba_rentable == pytest.approx(10 / 15)
+    assert proba_rentable == pytest.approx(0.5)
     # Le melange reste positif ici, mais nettement moins bon que le mono.
     assert r.ev_profit < 29.0
 
@@ -302,15 +301,16 @@ def test_un_melange_setale_sur_les_sorties_des_deux_collections():
 
 
 def test_la_dilution_suit_la_formule_de_probabilite():
-    """P(s de C) = n_C / somme(n_C' x k_C').
+    """P(collection) = ses entrees / total. Le nombre de sorties ne fait que
+    repartir cette part entre ses skins.
 
     Collection Rentable a DEUX sorties, Collection Perdante une seule. Avec
-    9 entrees rentables et 1 perdante : denominateur = 9x2 + 1x1 = 19. Chaque
-    sortie rentable pese 9/19 et l'intruse 1/19.
+    9 entrees rentables et 1 perdante : la rentable pese 90 %, soit 45 % par
+    sortie ; l'intruse pese 10 % a elle seule.
 
-    Le resultat contre-intuitif est la : une seule entree etrangere ne prend
-    pas 10 % de la masse mais 5 %, parce que la collection d'en face a moins de
-    sorties. La dilution depend du NOMBRE de sorties, pas que des entrees.
+    C'est la correction de septembre 2026. L'ancienne formule ponderait la part
+    par le nombre de sorties et donnait 5.3 % a l'intruse au lieu de 10 % --
+    elle sous-estimait de moitie ce qu'on ajoute justement pour diluer.
     """
     from tradeup.ev import outcome_probabilities
 
@@ -327,5 +327,23 @@ def test_la_dilution_suit_la_formule_de_probabilite():
     )
     assert sum(probas.values()) == pytest.approx(1.0)
     for s in rentables:
-        assert probas[s.key] == pytest.approx(9 / 19)
-    assert probas[perdantes[0].key] == pytest.approx(1 / 19)
+        assert probas[s.key] == pytest.approx(0.45)
+    assert probas[perdantes[0].key] == pytest.approx(0.10)
+
+
+def test_une_collection_sans_sortie_ne_dilue_pas_la_masse():
+    """Ses entrees sont du cout pur, mais la somme doit rester une probabilite.
+
+    Les compter au denominateur ferait une masse inferieure a 1 -- une erreur
+    facile a introduire en passant a la part par entrees.
+    """
+    from tradeup.ev import outcome_probabilities
+
+    db = SkinDatabase.from_dict(RAW_DB)
+    rentables = db.collection("col_rentable").outcomes_for_input_rarity(
+        Rarity.MIL_SPEC)
+    probas = outcome_probabilities(
+        {"col_rentable": 7, "col_vide": 3},
+        {"col_rentable": rentables, "col_vide": ()},
+    )
+    assert sum(probas.values()) == pytest.approx(1.0)
