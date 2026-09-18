@@ -537,9 +537,17 @@ def cmd_scan(args) -> int:
             file=sys.stderr,
         )
 
+    # La profitabilite prime si elle est demandee : c'est la convention dans
+    # laquelle l'utilisateur a pose son critere.
+    min_roi = args.min_roi
+    if getattr(args, "min_profitability", None) is not None:
+        min_roi = args.min_profitability - 1.0
+        print(f"Seuil : profitabilite >= {args.min_profitability:.0%} "
+              f"(soit ROI >= {min_roi:+.0%}).", file=sys.stderr)
+
     screen = ScreenConfig(
         min_ev_profit=args.min_ev,
-        min_roi=args.min_roi,
+        min_roi=min_roi,
         min_profit_probability=args.min_pwin,
         max_cost=args.max_cost,
         max_unpriced_probability=args.max_unpriced,
@@ -1032,6 +1040,11 @@ def build_parser() -> argparse.ArgumentParser:
     # Filtres
     s.add_argument("--min-ev", type=float, default=0.0)
     s.add_argument("--min-roi", type=float, default=0.03)
+    s.add_argument("--min-profitability", type=float, default=None,
+                   metavar="X",
+                   help="seuil dans la convention des guides : 1.0 = point "
+                        "mort, 1.2 = +20 %%. Equivaut a --min-roi (X - 1) et "
+                        "le remplace s'il est donne")
     s.add_argument("--min-pwin", type=float, default=0.0)
     s.add_argument("--max-cost", type=float, default=None)
     s.add_argument("--max-unit-cost", type=float, default=None)

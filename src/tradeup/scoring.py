@@ -51,7 +51,14 @@ class ScreenConfig:
         if r.ev_profit < self.min_ev_profit:
             reasons.append(f"EV {r.ev_profit:+.2f} < {self.min_ev_profit:+.2f}")
         if r.roi < self.min_roi:
-            reasons.append(f"ROI {r.roi:.1%} < {self.min_roi:.1%}")
+            # Les deux conventions dans le meme message : le projet raisonne en
+            # ROI, les guides et calculateurs en profitabilite (1.0 = point
+            # mort). Un rejet qui n'en donne qu'une invite a comparer 40 a 100.
+            reasons.append(
+                f"ROI {r.roi:.1%} < {self.min_roi:.1%} "
+                f"(profitabilite {r.profitability:.0%} < "
+                f"{1 + self.min_roi:.0%})"
+            )
         if r.profit_probability < self.min_profit_probability:
             reasons.append(
                 f"P(profit) {r.profit_probability:.1%} < {self.min_profit_probability:.1%}"

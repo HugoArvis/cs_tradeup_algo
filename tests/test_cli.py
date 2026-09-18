@@ -209,3 +209,35 @@ def test_inventory_est_declaree():
 def test_inventory_fichier_absent(capsys):
     assert cli.main(["inventory", "--file", "inexistant.json"]) == 1
     assert "introuvable" in capsys.readouterr().err.lower()
+
+
+def test_le_seuil_de_profitabilite_se_traduit_en_roi():
+    """L'utilisateur pose son critere en profitabilite (1.0 = point mort),
+    le moteur raisonne en ROI. La conversion doit etre exacte, sinon on
+    compare 40 a 100."""
+    a = parse("scan", "--min-profitability", "1.2")
+    assert a.min_profitability == pytest.approx(1.2)
+    # 120 % de profitabilite = +20 % de ROI.
+    assert a.min_profitability - 1.0 == pytest.approx(0.20)
+    assert parse("scan").min_profitability is None  # sans effet par defaut
+
+
+def test_le_rejet_donne_les_deux_conventions():
+    """Un motif qui n'affiche que le ROI invite a le confondre avec la
+    profitabilite lue dans une video."""
+    from tradeup.ev import Outcome, TradeUpResult
+    from tradeup.models import Rarity, Skin, Wear
+    from tradeup.scoring import ScreenConfig
+
+    skin = Skin("s", "S", "c", Rarity.RESTRICTED, 0.0, 1.0)
+    perdant = TradeUpResult(
+        outcomes=(Outcome(skin=skin, float_value=0.1, wear=Wear.FACTORY_NEW,
+                          probability=1.0, net_value=40.0, priced=True),),
+        inputs=(), cost=100.0, avg_input_float=0.1, avg_normalized=0.1,
+        stattrak=False, unpriced_probability=0.0)
+
+    screen = ScreenConfig(min_roi=0.0)
+    assert not screen.passes(perdant)
+    motif = " ".join(screen.last_reasons)
+    assert "ROI" in motif and "profitabilite" in motif
+    assert "40%" in motif  # le contrat rend 40 centimes par euro
