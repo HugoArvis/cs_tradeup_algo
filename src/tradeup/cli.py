@@ -255,22 +255,32 @@ def cmd_collections(args) -> int:
         if args.max_outcomes is not None and len(outs) > args.max_outcomes:
             continue
         fn_possible = sum(1 for s in outs if s.min_float < Wear.FACTORY_NEW.hi)
+        seuil = c.factory_new_threshold(rarity, args.stattrak)
         rows.append((len(outs), c,
-                     len(c.inputs_for_rarity(rarity, args.stattrak)), fn_possible))
+                     len(c.inputs_for_rarity(rarity, args.stattrak)), fn_possible,
+                     seuil))
 
     rows.sort(key=lambda r: (r[0], r[1].name))
 
     print(f"{len(rows)} collections en {rarity.label} -> {rarity.next_up.label}")
     print(f"(cout d'un telechargement complet : ~{len(rows) * 4 / 60:.1f} h)\n")
-    print(f"{'collection':<44} {'sorties':>8} {'proba':>7} {'entrees':>8} {'dont FN':>8}")
-    print("-" * 80)
-    for n_out, c, n_in, fn in rows:
+    print(f"{'collection':<44} {'sorties':>8} {'proba':>7} {'entrees':>8} "
+          f"{'dont FN':>8} {'seuil FN':>9}")
+    print("-" * 90)
+    for n_out, c, n_in, fn, seuil in rows:
         marque = " <<" if n_out == 1 else ""
         print(
-            f"{c.name:<44} {n_out:>8} {1 / n_out:>6.0%} {n_in:>8} {fn:>8}{marque}"
+            f"{c.name:<44} {n_out:>8} {1 / n_out:>6.0%} {n_in:>8} {fn:>8} "
+            f"{seuil:>9.3f}{marque}"
         )
+    print("\n  seuil FN : moyenne d'entree maximale gardant TOUTES les sorties "
+          "en Factory New.")
+    print("  Plus il est haut, moins les entrees doivent etre bonnes -- 0.875 "
+          "signifie que")
+    print("  presque n'importe quelle entree suffit ; sous 0.10 il faut trier "
+          "les annonces.")
 
-    certains = [c for n, c, _, _ in rows if n == 1]
+    certains = [c for n, c, _, _, _ in rows if n == 1]
     if certains:
         print(
             f"\n{len(certains)} collections a UNE SEULE sortie : le resultat est "

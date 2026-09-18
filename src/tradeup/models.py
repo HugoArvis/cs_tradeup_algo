@@ -203,6 +203,33 @@ class Collection:
             sorties = tuple(s for s in sorties if s.stattrak)
         return sorties
 
+    def factory_new_threshold(self, rarity: Rarity, stattrak: bool = False) -> float:
+        """Moyenne d'entree maximale qui garde TOUTES les sorties en Factory New.
+
+        Une sortie passe en Factory New tant que
+        `moyenne x span + min_float < 0.07`. Le seuil vaut donc
+        `(0.07 - min_float) / span`, et celui de la collection est le plus
+        contraignant de ses sorties.
+
+        Ce que ce chiffre dit, et qui ne se devine pas : plus il est HAUT, moins
+        les entrees doivent etre bonnes. Une sortie plafonnee a 0.08 de float
+        tolere une moyenne de 0.875 -- presque n'importe quelle entree donne du
+        Factory New. Une sortie allant jusqu'a 1.0 exige une moyenne sous 0.07,
+        ce qui demande de trier les annonces une par une.
+
+        C'est donc un critere de SOURCING, disponible sans aucune cotation :
+        il dit ou le palier le plus cher est atteignable a peu de frais.
+        """
+        sorties = self.outcomes_for_input_rarity(rarity, stattrak)
+        if not sorties:
+            return 0.0
+        seuils = []
+        for s in sorties:
+            if s.min_float >= Wear.FACTORY_NEW.hi:
+                return 0.0  # ce skin ne peut jamais etre Factory New
+            seuils.append(min(1.0, (Wear.FACTORY_NEW.hi - s.min_float) / s.float_span))
+        return min(seuils)
+
     def inputs_for_rarity(
         self, rarity: Rarity, stattrak: bool = False
     ) -> tuple[Skin, ...]:

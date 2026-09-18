@@ -115,6 +115,23 @@ euro engagé : il en détruit 60. C'est `1 + roi`, mais comparer un chiffre du
 projet à celui d'une vidéo exige la même convention, sans quoi on compare 10
 à 110.
 
+**Le float cap de la SORTIE décide de la difficulté**, pas celui de l'entrée.
+Une sortie plafonnée à 0,08 passe en Factory New tant que la moyenne d'entrée
+reste sous 0,875 — presque n'importe quelle entrée suffit. Une sortie allant
+jusqu'à 1,00 exige une moyenne sous 0,07, donc un tri annonce par annonce.
+`Collection.factory_new_threshold()` calcule ce seuil **sans aucune cotation**,
+et `collections` l'affiche : c'est un critère de sourcing gratuit qui dit où
+chercher. Contraste mesuré sur la base réelle — Aztec 0,875 contre Nuke 0,014,
+deux collections à sortie unique pourtant.
+
+**Sur Steam, le prix ne dépend pas du float** : il n'apparaît pas dans la liste,
+il faut inspecter chaque annonce. Les vendeurs ne le pricent donc pas, et un bas
+float s'y obtient au prix du palier — c'est l'inefficience que la stratégie de
+tri exploite. Sur **CSFloat**, le float est visible et pricé : la prime y est
+réelle (P250 Kintsugi 22,62 € au palier, 40,27 € sous 0,0105). D'où le choix du
+modèle de float : `fixed` est légitime si l'on trie les annonces Steam,
+`random` si l'on achète sans regarder.
+
 **Float de sortie** : moyenne des floats **normalisés** — chaque entrée ramenée
 à `(float − min_skin) / (max_skin − min_skin)` — puis remappée sur le range du
 skin de **sortie**. Moyenner les floats affichés est faux : sur un contrat réel,

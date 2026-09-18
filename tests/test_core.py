@@ -417,3 +417,45 @@ def test_la_profitabilite_suit_la_convention_des_guides():
     mauvais = contrat(40.0, 100.0)
     assert mauvais.profitability == pytest.approx(0.40)
     assert mauvais.roi == pytest.approx(-0.60)
+
+
+def test_le_seuil_factory_new_dit_ou_le_tri_est_inutile():
+    """Critere de SOURCING, disponible sans aucune cotation.
+
+    Une sortie plafonnee a 0.08 de float tolere une moyenne d'entree de 0.875 :
+    presque n'importe quelle entree donne du Factory New. Une sortie allant
+    jusqu'a 1.0 exige une moyenne sous 0.07, donc un tri annonce par annonce.
+    Mesure sur la base reelle : Aztec 0.875 contre Nuke 0.014, deux collections
+    a sortie unique pourtant.
+    """
+    from tradeup.models import Collection
+
+    def collection(mn, mx):
+        return Collection(id="c", name="C", skins=(
+            make_skin("in", Rarity.INDUSTRIAL),
+            Skin(key="out", name="Out", collection_id="c",
+                 rarity=Rarity.MIL_SPEC, min_float=mn, max_float=mx),
+        ))
+
+    # Sortie plafonnee bas : le Factory New est presque toujours atteint.
+    assert collection(0.0, 0.08).factory_new_threshold(
+        Rarity.INDUSTRIAL) == pytest.approx(0.875)
+    # Sortie sur tout le range : il faut une moyenne tres basse.
+    assert collection(0.0, 1.0).factory_new_threshold(
+        Rarity.INDUSTRIAL) == pytest.approx(0.07)
+    # Sortie qui commence au-dessus de 0.07 : le palier n'existe pas pour elle.
+    assert collection(0.10, 0.80).factory_new_threshold(Rarity.INDUSTRIAL) == 0.0
+
+
+def test_le_seuil_retient_la_sortie_la_plus_contraignante():
+    """Toutes les sorties doivent tenir, pas seulement la plus facile."""
+    from tradeup.models import Collection
+
+    col = Collection(id="c", name="C", skins=(
+        make_skin("in", Rarity.INDUSTRIAL),
+        Skin(key="facile", name="Facile", collection_id="c",
+             rarity=Rarity.MIL_SPEC, min_float=0.0, max_float=0.08),
+        Skin(key="dur", name="Dur", collection_id="c",
+             rarity=Rarity.MIL_SPEC, min_float=0.0, max_float=1.0),
+    ))
+    assert col.factory_new_threshold(Rarity.INDUSTRIAL) == pytest.approx(0.07)
