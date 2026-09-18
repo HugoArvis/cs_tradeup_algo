@@ -343,3 +343,40 @@ def test_le_payload_dinventaire_porte_de_quoi_classer(app, monkeypatch):
                   "outcomes_count", "always_profitable"):
         assert champ in ligne, champ
     assert 0.0 <= ligne["win_probability"] <= 1.0
+
+
+# --- Ce que le balayage renvoie a la page ------------------------------------
+
+
+def test_le_balayage_ne_renvoie_que_les_contrats_rentables(app):
+    """Regle d'affichage : sous le point mort, ce n'est pas un candidat.
+
+    Le tri se fait cote serveur pour qu'aucune page ne puisse le desactiver.
+    Un contrat a 99 % est ecarte comme un contrat a 40 % : il perd de
+    l'argent, l'ecart n'est que de degre.
+    """
+    from tradeup.web import Batch
+
+    b = Batch(id="x", rarity="mil-spec", pending=[], total=4)
+    b.done = [
+        {"plan_id": "p1", "profitability": 0.40, "profit": -3.0},
+        {"plan_id": "p2", "profitability": 1.20, "profit": 2.0},
+        {"plan_id": "p3", "profitability": 0.99, "profit": -0.1},
+        {"plan_id": "p4", "profitability": 1.05, "profit": 0.5},
+    ]
+    d = app.batch_payload(b)
+
+    assert [r["plan_id"] for r in d["results"]] == ["p2", "p4"]
+    assert d["computed"] == 4 and d["rejected"] == 2
+
+
+def test_le_balayage_dit_qu_il_a_travaille_meme_sans_resultat(app):
+    """Sinon "aucun resultat" est indiscernable d'une panne."""
+    from tradeup.web import Batch
+
+    b = Batch(id="y", rarity="mil-spec", pending=[], total=2)
+    b.done = [{"plan_id": "p1", "profitability": 0.80, "profit": -1.0}]
+    d = app.batch_payload(b)
+
+    assert d["results"] == []
+    assert d["computed"] == 1 and d["rejected"] == 1

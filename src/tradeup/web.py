@@ -141,6 +141,11 @@ class InventoryJob:
         return time.time() - self.started
 
 
+# Convention des guides et des calculateurs : 1.0 est le point mort, pas le
+# profit. En dessous, le contrat detruit de la valeur.
+SEUIL_PROFITABLE = 1.0
+
+
 class App:
     """Etat partage du serveur : base, cle, taches."""
 
@@ -479,6 +484,17 @@ class App:
             )
 
     def batch_payload(self, batch: Batch) -> dict:
+        """Ce que la page affiche : les contrats rentables, et eux seuls.
+
+        Le tri se fait ici, pas dans le navigateur. Un contrat sous le point
+        mort n'est pas un candidat moins bon, c'est une perte : le presenter
+        dans une liste de recommandations, meme dernier, invite a le lire
+        comme une option. Rien n'est perdu pour autant -- tous les plans sont
+        enregistres au journal, l'onglet Historique les retrouve.
+        """
+        retenus = [d for d in batch.done
+                   if d.get("profitability", 0.0) >= SEUIL_PROFITABLE]
+        retenus.sort(key=lambda d: -d["profitability"])
         return {
             "id": batch.id,
             "rarity": batch.rarity,
@@ -490,8 +506,9 @@ class App:
             "elapsed": round(time.time() - batch.started),
             "resume_in": max(0, round(batch.resume_at - time.time())),
             "currency": self.currency,
-            # Tri par defaut au profit ; l'interface reclasse sans recalculer.
-            "results": sorted(batch.done, key=lambda d: -d["profit"])[:40],
+            "computed": len(batch.done),
+            "rejected": len(batch.done) - len(retenus),
+            "results": retenus,
             "failed": batch.failed[-10:],
         }
 
@@ -906,21 +923,25 @@ box-shadow:0 2px 10px rgba(0,0,0,.25)}
 #banniere.on{display:block}
 #banniere.err{background:var(--neg)}
 #banniere .spin{border-color:rgba(255,255,255,.4);border-top-color:#fff}
-/* --- Profitabilite : la metrique qui decide --- */
-/* 100 % est le point mort, pas le profit. Un contrat a 40 % rend 40 centimes
-   par euro engage : il en detruit 60. La couleur porte ce seuil pour qu'aucune
-   ligne ne soit lue a l'envers. */
-.prof{font-weight:700}
-.prof.go{color:var(--pos)}
-.prof.no{color:var(--neg)}
-.kpi .val.big{font-size:26px}
-.seuil{font-variant-numeric:tabular-nums}
-.seuil.facile{color:var(--pos);font-weight:600}
-.seuil.dur{color:var(--muted)}
+/* --- Profitabilite : la seule metrique affichee --- */
+/* 100 % est le point mort, pas le profit. La page ne montre que ce qui est
+   au-dessus, donc la couleur n'a plus a departager : elle confirme. */
+.prof{font-weight:700;color:var(--pos)}
+.gros{font-size:30px;line-height:1.1}
 .jauge{height:4px;background:var(--line);border-radius:2px;overflow:hidden;
 margin-top:6px}
 .jauge i{display:block;height:100%;background:var(--pos)}
-.jauge i.no{background:var(--neg)}
+.tete{display:flex;justify-content:space-between;align-items:flex-start;
+gap:16px;flex-wrap:wrap;margin-bottom:10px}
+.tete h2{font-size:17px;margin:0 0 2px}
+.chiffres{display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;
+color:var(--muted);font-size:14px}
+.chiffres b{color:var(--ink);font-variant-numeric:tabular-nums}
+.warn.ok{border-left-color:var(--pos)}
+.etape{font-weight:650;margin:18px 0 4px;padding-top:14px;
+border-top:1px solid var(--line)}
+details{margin-top:12px}
+summary{cursor:pointer;color:var(--accent);font-size:13px}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);
 border-top-color:var(--accent);border-radius:50%;animation:s .8s linear infinite;
 vertical-align:-2px;margin-right:7px}
@@ -940,62 +961,27 @@ vertical-align:-2px;margin-right:7px}
 </div>
 
 <div class="pane on" id="pane-calcul">
-<div id="sortie"></div>
-<div class="card">
-  <div class="row">
-    <label>Rareté d'entrée
-      <select id="rarity">
-        <option value="consumer">Consumer</option>
-        <option value="industrial">Industrial</option>
-        <option value="mil-spec" selected>Mil-Spec</option>
-        <option value="restricted">Restricted</option>
-        <option value="classified">Classified</option>
-      </select>
-    </label>
-    <label>Sorties max
-      <select id="maxout">
-        <option value="1">1 (résultat certain)</option>
-        <option value="2">≤ 2</option>
-        <option value="3">≤ 3</option>
-        <option value="5">≤ 5</option>
-        <option value="99" selected>toutes</option>
-      </select>
-    </label>
-    <input id="filtre" placeholder="filtrer par nom…" style="flex:1;min-width:160px">
+  <div class="card">
+    <p class="muted">Le modèle cote chaque collection de la rareté choisie et
+    ne garde que les contrats <b>rentables</b> : ceux dont la revente attendue
+    dépasse ce que les dix entrées coûtent. Les autres ne sont pas affichés —
+    il n’y a rien à en faire.</p>
+    <div class="row">
+      <label>Rareté d’entrée
+        <select id="rarity">
+          <option value="consumer">Consumer</option>
+          <option value="industrial" selected>Industrial</option>
+          <option value="mil-spec">Mil-Spec</option>
+          <option value="restricted">Restricted</option>
+          <option value="classified">Classified</option>
+        </select>
+      </label>
+      <button id="chercher">Chercher les tradeups rentables</button>
+    </div>
+    <p class="muted" id="cout-balayage">…</p>
   </div>
-  <p class="muted" id="compte">…</p>
-  <div class="row" style="border-top:1px solid var(--line);padding-top:12px">
-    <button class="ghost" id="balayer">Tout calculer pour cette rareté</button>
-    <label><input type="checkbox" id="bat-profitables"> seulement les
-      profitables (&gt; 100 %)</label>
-    <label>Classer par
-      <select id="bat-rank">
-        <option value="risk_adjusted" selected>gain régulier (défaut)</option>
-        <option value="safety">probabilité de gagner</option>
-        <option value="ev">gain le plus élevé</option>
-        <option value="roi">rendement</option>
-      </select>
-    </label>
-    <span class="muted" id="cout-balayage"></span>
-  </div>
-  <div id="balayage"></div>
-  <div class="scroll"><table>
-    <thead><tr><th>Collection</th><th class="num">Sorties</th>
-      <th class="num">Probabilité</th><th class="num">Entrées</th>
-      <th class="num">Seuil FN</th>
-      <th class="num">Requêtes</th><th></th></tr></thead>
-    <tbody id="liste"><tr><td colspan="6" class="muted">chargement…</td></tr></tbody>
-  </table></div>
-  <p class="muted"><b>Seuil FN</b> : moyenne de float d'entrée maximale qui
-  garde la sortie en Factory New. Il se lit à l'envers de l'intuition —
-  <b>plus il est haut, moins les entrées doivent être bonnes</b>. Au-dessus de
-  0,300 le Factory New s'obtient sans trier ; en dessous il faut inspecter les
-  annonces une par une. Ce chiffre ne coûte aucune requête.</p>
-  <p class="muted">La colonne <b>Requêtes</b> est le coût CSFloat du plan.
-  À 10 requêtes/minute, comptez environ ce nombre divisé par 10 en minutes.
-  Le quota est limité sur une fenêtre longue : enchaînez sans excès.</p>
-</div>
-
+  <div id="avancement"></div>
+  <div id="resultats"></div>
 </div>
 
 <div class="pane" id="pane-inventaire">
@@ -1061,37 +1047,17 @@ vertical-align:-2px;margin-right:7px}
 const $ = s => document.querySelector(s);
 // --- Profitabilite ----------------------------------------------------------
 // Convention des guides et des calculateurs : 1.0 est le POINT MORT, pas le
-// profit. Un contrat annonce "a 40 %" rend 40 centimes par euro engage.
-// Afficher un rendement de +18 % a cote d'une profitabilite de 118 % sans les
-// distinguer conduit a lire l'un pour l'autre.
+// profit. Un contrat annonce "a 40 %" rend 40 centimes par euro engage, il en
+// detruit 60. La page ne montre rien en dessous de 100 % : ce qui detruit de
+// la valeur n'est pas un candidat, et le ranger parmi des candidats invite a
+// le lire comme tel.
 
-const SEUIL_PROFITABLE = 1.0;
-
-function profClasse(p) {
-  return (p || 0) >= SEUIL_PROFITABLE ? 'go' : 'no';
-}
-
-function profTexte(p) {
-  return Math.round((p || 0) * 100) + '%';
-}
+function profTexte(p) { return Math.round((p || 0) * 100) + '%'; }
 
 // Jauge bornee a 200 % : au-dela l'echelle ecraserait tout le reste.
 function jauge(p) {
   const pct = Math.min(100, ((p || 0) / 2) * 100);
-  const cls = profClasse(p) === 'go' ? '' : ' class="no"';
-  return '<div class="jauge"><i' + cls + ' style="width:' + pct + '%"></i></div>';
-}
-
-// Le seuil Factory New se lit a l'envers de l'intuition : PLUS il est haut,
-// MOINS les entrees doivent etre bonnes.
-function seuilFN(v) {
-  if (!v) return '<span class="seuil dur">—</span>';
-  const facile = v >= 0.30;
-  const titre = facile
-    ? 'Factory New atteint sans trier les annonces'
-    : 'il faut trier les floats un par un';
-  return '<span class="seuil ' + (facile ? 'facile' : 'dur') + '" title="' +
-    titre + '">' + v.toFixed(3) + '</span>';
+  return '<div class="jauge"><i style="width:' + pct + '%"></i></div>';
 }
 
 function banniere(texte, erreur) {
@@ -1107,289 +1073,192 @@ window.addEventListener('error', e =>
   banniere('Erreur dans la page : ' + e.message, true));
 window.addEventListener('unhandledrejection', e =>
   banniere('Erreur : ' + (e.reason && e.reason.message || e.reason), true));
-let collections = [], choisie = null, sondage = null;
+
+let collections = [];
 
 async function charger() {
-  const r = $('#rarity').value;
-  $('#liste').innerHTML = '<tr><td colspan="6" class="muted">chargement…</td></tr>';
-  const rep = await fetch('/api/collections?rarity=' + r).then(x => x.json());
+  const rep = await fetch('/api/collections?rarity=' + $('#rarity').value)
+    .then(x => x.json());
   collections = rep.collections || [];
-  dessiner();
+  const req = collections.reduce((n, c) => n + c.requests, 0);
+  const h = req / 10 / 60;
+  $('#cout-balayage').textContent = collections.length
+    ? `${collections.length} collections à coter, ~${req} requêtes CSFloat, ` +
+      `soit ~${h < 1 ? Math.round(h * 60) + ' min' : h.toFixed(1) + ' h'}. ` +
+      `Le quota interrompra peut-être la recherche : elle reprend toute seule.`
+    : 'aucune collection dans cette rareté.';
 }
 
-function dessiner() {
-  const max = +$('#maxout').value;
-  const q = $('#filtre').value.trim().toLowerCase();
-  const vues = collections.filter(c => c.outcomes <= max &&
-    (!q || c.name.toLowerCase().includes(q)));
-  // Sans ce compteur, un filtre actif donne l'impression que des collections
-  // manquent alors qu'elles sont simplement masquees.
-  const caches = collections.length - vues.length;
-  setTimeout(estimerBalayage, 0);
-  $('#compte').textContent = caches
-    ? `${vues.length} affichées sur ${collections.length} — ${caches} masquées par les filtres`
-    : `${collections.length} collections`;
-  if (!vues.length) {
-    $('#liste').innerHTML = '<tr><td colspan="6" class="muted">aucune collection</td></tr>';
-    return;
-  }
-  $('#liste').innerHTML = vues.map(c => `
-    <tr class="pick${choisie === c.id ? ' sel' : ''}" data-id="${c.id}">
-      <td>${c.name}</td>
-      <td class="num">${c.outcomes === 1
-        ? '<span class="tag">1 — certain</span>' : c.outcomes}</td>
-      <td class="num">${(100 / c.outcomes).toFixed(0)}%</td>
-      <td class="num">${c.inputs}</td>
-      <td class="num">${seuilFN(c.fn_threshold)}</td>
-      <td class="num">${c.requests}</td>
-      <td><button data-run="${c.id}">Calculer</button></td>
-    </tr>`).join('');
-}
+// --- La carte d'un contrat --------------------------------------------------
+// Un seul rendu pour tout : resultat d'une recherche ou plan repris de
+// l'historique disent la meme chose, il n'y a aucune raison de les mettre en
+// forme deux fois.
 
-document.addEventListener('click', e => {
-  const b = e.target.closest('[data-run]');
-  if (b) {
-    // Retour immediat SUR le bouton : sans lui, un clic sur une longue liste
-    // semble ne rien faire, le resultat s'affichant hors du champ de vision.
-    b.disabled = true;
-    b.textContent = 'Calcul…';
-    choisie = b.dataset.run;
-    lancer(b.dataset.run);
-    return;
-  }
-  const tr = e.target.closest('tr.pick');
-  if (tr) { choisie = tr.dataset.id; dessiner(); }
-});
+function carte(p, planId, archive) {
+  const bloc = [];
 
-async function lancer(id) {
-  clearInterval(sondage);
-  const col = collections.find(c => c.id === id);
-  if (!col) { echec('Collection introuvable : ' + id); return; }
-  const mins = Math.max(1, Math.round(col.requests / 10));
-  $('#sortie').innerHTML = `<div class="card"><span class="spin"></span>
-    Calcul en cours sur <b>${col.name}</b> —
-    <span id="chrono">0</span> s écoulées.
-    <div class="muted">Environ ${col.requests} requêtes CSFloat, soit ~${mins} min.
-    Ne fermez pas la page.</div></div>`;
-  $('#sortie').scrollIntoView({behavior: 'smooth', block: 'start'});
-  banniere('Calcul en cours sur ' + col.name + ' — environ ' + mins + ' min…');
+  if (archive) bloc.push(`<div class="warn"><b>Plan archivé.</b> Ces valeurs
+    sont figées au moment du calcul : les annonces ont pu partir et les prix
+    bouger. Relancez une recherche avant d’acheter.</div>`);
 
-  try {
-    const rep = await fetch('/api/plan', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({collection: id, rarity: $('#rarity').value})
-    }).then(x => x.json());
-    if (rep.error) { echec(rep.error); return; }
-    sondage = setInterval(() => suivre(rep.job), 2000);
-    suivre(rep.job);
-  } catch (err) {
-    // Sans ce filet, une coupure du serveur laissait la page tourner
-    // indefiniment sans rien dire.
-    echec('Le serveur ne répond pas (' + err.message +
-          '). Vérifiez que le terminal tourne toujours.');
-  }
-}
-
-function echec(message) {
-  clearInterval(sondage);
-  banniere(message, true);
-  setTimeout(cacherBanniere, 8000);
-  $('#sortie').innerHTML = '<div class="card"><div class="warn">' + message + '</div></div>';
-  $('#sortie').scrollIntoView({behavior: 'smooth', block: 'start'});
-  dessiner();
-}
-
-async function suivre(job) {
-  const d = await fetch('/api/job/' + job).then(x => x.json());
-  const chrono = $('#chrono');
-  if (chrono) chrono.textContent = d.elapsed;
-  if (d.state === 'running') {
-    banniere('Calcul en cours — ' + d.elapsed + ' s écoulées…');
-  }
-  if (d.state === 'running') return;
-  clearInterval(sondage);
-  if (d.state === 'done') { cacherBanniere(); afficher(d); dessiner(); }
-  else echec(d.message || 'Aucun résultat.');
-}
-
-function afficher(d) {
-  const p = d.plan, cls = p.profit >= 0 ? 'pos' : 'neg';
-  if (p.currency && !d.archive) $('#devise').textContent = p.currency;
-  const avert = [];
-  if (d.archive) avert.push('<div class="warn"><b>Plan archivé.</b> Ces valeurs ' +
-    'sont figées au moment du calcul : les annonces ont pu être vendues et les ' +
-    'prix bouger. Montants en ' + (p.currency || 'USD') + '. ' +
-    '<b>Relancez le calcul avant d\u2019acheter.</b></div>');
-  if (p.price_drop_tolerance !== null) avert.push(`<div class="warn">
-    <b>Blocage 7 jours.</b> Les achats CSFloat arrivent par échange : utilisables
-    dans un contrat seulement dans 7 jours. Le prix de sortie peut baisser de
-    <b>${(p.price_drop_tolerance * 100).toFixed(1)}%</b> d'ici là avant de perdre.</div>`);
-  if (p.downgrade_profit !== null) avert.push(`<div class="warn">
-    <b>Tolérance de float : ${p.float_slack.toFixed(4)}</b> sur la somme des dix
-    entrées. Si une annonce part et que la remplaçante dépasse cette marge, la
-    sortie perd un palier : <span class="neg">${p.downgrade_profit.toFixed(2)}</span>
-    au lieu de <span class="pos">+${p.profit.toFixed(2)}</span>.</div>`);
   if (p.all_profitable) {
-    avert.push(`<div class="warn" style="border-left-color:var(--pos)">
-      <b>Toutes les sorties sont rentables.</b> Quel que soit le skin obtenu,
-      vous gagnez : entre <b>+${p.worst_profit.toFixed(2)}</b> (pire cas) et
-      <b>+${p.best_profit.toFixed(2)}</b> (meilleur cas). Le tirage ne peut pas
-      vous faire perdre — seule une chute des prix le pourrait.</div>`);
+    bloc.push(`<div class="warn ok"><b>Toutes les sorties sont rentables.</b>
+      Quel que soit le skin obtenu vous gagnez, entre
+      <b>+${(p.worst_profit || 0).toFixed(2)}</b> et
+      <b>+${(p.best_profit || 0).toFixed(2)}</b>. Seule une chute des prix peut
+      vous faire perdre, pas le tirage.</div>`);
   } else if (p.worst_profit !== null && p.worst_profit !== undefined) {
-    avert.push(`<div class="warn">
-      <b>Le tirage peut vous faire perdre.</b> Selon la sortie obtenue, le
-      résultat va de <span class="neg">${p.worst_profit.toFixed(2)}</span> à
-      <span class="pos">+${p.best_profit.toFixed(2)}</span>.</div>`);
-  }
-  if (p.exit_loss !== null && p.exit_loss !== undefined && p.profit > 0) {
-    avert.push(`<div class="warn" style="border-left-color:var(--pos)">
-      <b>Vous n'êtes pas engagé.</b> Au bout des 7 jours vos skins sont libres :
-      si le contrat n'est plus rentable, revendez-les au lieu de les fusionner.
-      Cela coûte <b>${p.exit_loss.toFixed(2)}</b>
-      (${(p.exit_loss_ratio * 100).toFixed(1)}%), contre
-      <b>+${p.profit.toFixed(2)}</b> à gagner — soit
-      ${Math.abs(p.profit / p.exit_loss).toFixed(1)}x plus à gagner qu'à perdre.</div>`);
+    bloc.push(`<div class="warn"><b>Le tirage peut vous faire perdre.</b>
+      Selon la sortie obtenue, le résultat va de
+      <span class="neg">${p.worst_profit.toFixed(2)}</span> à
+      <span class="pos">+${(p.best_profit || 0).toFixed(2)}</span>.</div>`);
   }
 
-  $('#sortie').innerHTML = `
-  <div class="card kpis">
-    <div class="kpi"><div class="lab">Coût</div><div class="val">${p.cost.toFixed(2)}</div></div>
-    <div class="kpi"><div class="lab">Revente nette</div><div class="val">${p.net.toFixed(2)}</div></div>
-    <div class="kpi"><div class="lab">Profit</div>
-      <div class="val ${cls}">${p.profit >= 0 ? '+' : ''}${p.profit.toFixed(2)}</div></div>
-    <div class="kpi"><div class="lab">Profitabilité</div>
-      <div class="val big prof ${profClasse(p.profitability)}">${
-        profTexte(p.profitability)}</div>
-      ${jauge(p.profitability)}
-      <div class="lab">100 % = point mort</div></div>
-  </div>
-  ${avert.join('')}
-  <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <b>${p.collection}${p.rarity ? ` <span class="tag">${p.rarity}</span>` : ''} — 10 annonces à acheter</b>
-      <span><button class="sm" data-follow="${d.plan_id}">Suivre ce plan</button>
-      ${d.id ? `<a class="buy" href="/report/${d.id}" target="_blank">Rapport imprimable</a>` : ''}</span>
+  const lignes = p.inputs.map(i => `<tr>
+    <td>${i.name}</td>
+    <td class="num">${i.float.toFixed(4)}</td>
+    <td class="num">${i.price.toFixed(2)}</td>
+    <td>${i.url ? `<a class="buy" href="${i.url}" target="_blank">Acheter</a>`
+      : '<span class="muted">annonce non identifiée</span>'}</td></tr>`).join('');
+
+  return `<div class="card">
+    <div class="tete">
+      <div>
+        <h2>${p.collection} <span class="tag">${p.rarity}</span></h2>
+        <div class="muted">10 entrées ${p.rarity} → 1 sortie ${p.rarity_target}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="gros prof">${profTexte(p.profitability)}</div>
+        ${jauge(p.profitability)}
+        <div class="muted">profitabilité — 100 % = point mort</div>
+      </div>
     </div>
+    <div class="chiffres">
+      <span>coût <b>${p.cost.toFixed(2)}</b></span>
+      <span>revente nette attendue <b>${p.net.toFixed(2)}</b></span>
+      <span>gain <b class="pos">+${p.profit.toFixed(2)}</b></span>
+      <span>chances de gagner <b>${((p.win_probability || 0) * 100).toFixed(0)}%</b></span>
+    </div>
+    ${bloc.join('')}
+    <div class="etape">Méthode d’achat</div>
+    <p class="muted">Ces dix annonces précises, sur CSFloat. Le float de chacune
+    est déjà celui qu’il faut : c’est lui qui décide de l’usure en sortie, donc
+    n’en remplacez aucune par un exemplaire moins cher.</p>
     <div class="scroll"><table>
-      <thead><tr><th>Objet</th><th class="num">Float</th><th class="num">Prix</th><th></th></tr></thead>
-      <tbody>${p.inputs.map(i => `<tr><td>${i.name}</td>
-        <td class="num">${i.float.toFixed(4)}</td>
-        <td class="num">${i.price.toFixed(2)}</td>
-        <td>${i.url ? `<a class="buy" href="${i.url}" target="_blank">Acheter</a>`
-          : '<span class="muted">non identifiée</span>'}</td></tr>`).join('')}</tbody>
+      <thead><tr><th>Objet</th><th class="num">Float</th>
+        <th class="num">Prix</th><th></th></tr></thead>
+      <tbody>${lignes}</tbody>
     </table></div>
-    <p class="muted">Moyenne de float : ${p.avg_float.toFixed(4)} &middot;
-    ${p.listings_examined} annonces examinées. Achetez les dix groupés :
-    le compteur de 7 jours démarre à la réception de chaque objet.</p>
-  </div>
-  <div class="card">
-    <b>Sortie</b>
-    <div class="scroll"><table>
-      <thead><tr><th>Skin</th><th class="num">Probabilité</th>
-        <th class="num">Float</th><th class="num">Net</th></tr></thead>
-      <tbody>${p.outcomes.map(o => `<tr><td>${o.name}</td>
-        <td class="num">${(o.probability * 100).toFixed(1)}%</td>
-        <td class="num">${o.float.toFixed(4)}</td>
-        <td class="num">${o.net.toFixed(2)}</td></tr>`).join('')}</tbody>
-    </table></div>
+    <p class="muted">Moyenne de float ${p.avg_float.toFixed(4)} sur
+    ${p.listings_examined} annonces examinées. Achetez les dix d’un coup : le
+    verrou de 7 jours part à la réception de chaque objet, et le contrat ne
+    peut se faire qu’une fois le dernier libéré.</p>
+    <details>
+      <summary>Ce que le contrat peut sortir</summary>
+      <div class="scroll"><table>
+        <thead><tr><th>Skin</th><th class="num">Probabilité</th>
+          <th class="num">Float</th><th class="num">Revente nette</th></tr></thead>
+        <tbody>${p.outcomes.map(o => `<tr><td>${o.name}</td>
+          <td class="num">${(o.probability * 100).toFixed(1)}%</td>
+          <td class="num">${o.float.toFixed(4)}</td>
+          <td class="num">${o.net.toFixed(2)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </details>
+    <div class="row" style="margin:12px 0 0">
+      <button class="sm" data-follow="${planId}">Suivre ce contrat</button>
+    </div>
   </div>`;
 }
 
-let sondageBatch = null;
+// --- La recherche -----------------------------------------------------------
 
-function estimerBalayage() {
-  const max = +$('#maxout').value;
-  const vues = collections.filter(c => c.outcomes <= max);
-  const req = vues.reduce((n, c) => n + c.requests, 0);
-  const h = req / 10 / 60;
-  $('#cout-balayage').textContent = vues.length
-    ? `${vues.length} collections, ~${req} requêtes CSFloat, soit ~${
-        h < 1 ? Math.round(h * 60) + ' min' : h.toFixed(1) + ' h'}`
-    : '';
+let sondageBatch = null, dernierBatch = null;
+// Un plan enregistre ne change plus : le relire a chaque sondage serait du
+// trafic pur.
+const plansCharges = {};
+
+async function chargerPlan(id) {
+  if (!plansCharges[id]) {
+    const r = await fetch('/api/plan/' + id).then(x => x.json());
+    if (r.error) throw new Error(r.error);
+    plansCharges[id] = r.plan;
+  }
+  return plansCharges[id];
 }
 
-$('#balayer').addEventListener('click', async () => {
-  const max = +$('#maxout').value;
-  const vues = collections.filter(c => c.outcomes <= max);
-  const req = vues.reduce((n, c) => n + c.requests, 0);
-  if (!confirm(`Calculer ${vues.length} collections ?\n\nEnviron ${req} requêtes ` +
-      `CSFloat, soit plusieurs heures. Le quota interrompra probablement le ` +
-      `balayage : il reprendra tout seul.\n\nLaissez le terminal ouvert.`)) return;
+$('#chercher').addEventListener('click', async () => {
+  const req = collections.reduce((n, c) => n + c.requests, 0);
+  // Les sauts de ligne sont ecrits en clair : un antislash dans ce fichier
+  // serait interprete par Python avant d'atteindre le navigateur.
+  const avert = `Coter ${collections.length} collections ?
 
+Environ ${req} requêtes CSFloat, soit un long moment. Laissez le terminal et
+cette page ouverts : la recherche reprend toute seule si le quota s’épuise.`;
+  if (!confirm(avert)) return;
+
+  $('#chercher').disabled = true;
+  $('#resultats').innerHTML = '';
   const r = await fetch('/api/batch', {method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({rarity: $('#rarity').value, max_outcomes: max})
-  }).then(x => x.json());
-  if (r.error) { banniere(r.error, true); return; }
+    body: JSON.stringify({rarity: $('#rarity').value})}).then(x => x.json());
+  if (r.error) { banniere(r.error, true); $('#chercher').disabled = false; return; }
   clearInterval(sondageBatch);
   sondageBatch = setInterval(() => suivreBatch(r.batch), 5000);
   suivreBatch(r.batch);
 });
 
-// Le dernier etat recu, pour reclasser sans refaire d'appel : un balayage
-// termine n'est plus sonde, et changer de critere ne doit rien recouter.
-let dernierBatch = null;
-
 async function suivreBatch(id) {
   const b = await fetch('/api/batch/' + id).then(x => x.json());
-  if (b.error) { clearInterval(sondageBatch); return; }
+  if (b.error) { clearInterval(sondageBatch); $('#chercher').disabled = false; return; }
 
-  const pct = Math.round(b.progress * 100);
   const fini = b.state === 'finished' || b.state === 'stopped';
-  if (fini) { clearInterval(sondageBatch); cacherBanniere(); }
-  else banniere(`Balayage ${pct}% — ${b.remaining} collections restantes` +
-    (b.state === 'paused' ? ` — quota épuisé, reprise dans ${b.resume_in}s` : ''));
-
+  if (fini) {
+    clearInterval(sondageBatch);
+    cacherBanniere();
+    $('#chercher').disabled = false;
+  } else {
+    banniere(`Recherche ${Math.round(b.progress * 100)}% — ` +
+      `${b.results.length} rentable(s) trouvé(s), ${b.remaining} collections ` +
+      `restantes` + (b.state === 'paused'
+        ? ` — quota épuisé, reprise dans ${b.resume_in}s` : ''));
+  }
   dernierBatch = b;
-  dessinerBatch(b);
+  await dessinerBatch(b);
 }
 
-function dessinerBatch(b) {
+async function dessinerBatch(b) {
   const pct = Math.round(b.progress * 100);
   const fini = b.state === 'finished' || b.state === 'stopped';
 
-  // Filtrer AVANT de classer : un contrat sous le point mort n'a pas a
-  // occuper une place dans un classement de candidats.
-  const retenus = $('#bat-profitables').checked
-    ? b.results.filter(x => (x.profitability || 0) >= SEUIL_PROFITABLE)
-    : b.results;
-  const classes = trier(retenus, $('#bat-rank').value,
-    x => ({gain: x.profit, roi: x.roi, win: x.win_probability || 0,
-           stdev: x.stdev || 0.01}));
-  const lignes = classes.map(x => `<tr>
-    <td>${x.collection}${x.rarity ? ` <span class="tag">${x.rarity}</span>` : ''}</td>
-    <td class="num">${x.outcomes}${x.all_profitable
-      ? ' <span class="tag" style="background:#0f7a3d;color:#fff">toutes OK</span>' : ''}</td>
-    <td class="num">${x.cost.toFixed(2)}</td>
-    <td class="num ${x.profit >= 0 ? 'pos' : 'neg'}">${
-      x.profit >= 0 ? '+' : ''}${x.profit.toFixed(2)}</td>
-    <td class="num prof ${profClasse(x.profitability)}">${
-      profTexte(x.profitability)}</td>
-    <td class="num">${((x.win_probability || 0) * 100).toFixed(0)}%</td>
-    <td><button class="ghost sm" data-voir="${x.plan_id}">Voir</button>
-        <button class="sm" data-follow="${x.plan_id}">Suivre</button></td></tr>`).join('');
-
-  $('#balayage').innerHTML = `<div class="card">
-    <div class="row" style="justify-content:space-between">
-      <b>Balayage ${b.rarity} — ${pct}%</b>
+  $('#avancement').innerHTML = `<div class="card">
+    <div class="row" style="justify-content:space-between;margin:0">
+      <b>${fini ? 'Recherche terminée' : 'Recherche en cours'} —
+        ${b.computed} collections cotées sur ${b.total}</b>
       ${fini ? '' : `<button class="ghost sm" data-stop="${b.id}">Arrêter</button>`}
     </div>
     <div class="bar"><i style="width:${pct}%"></i></div>
-    <p class="muted">${b.results.length} plans calculés, ${b.failed.length} échecs,
-      ${b.remaining} restantes &middot; ${Math.round(b.elapsed / 60)} min écoulées
-      ${b.message ? '&middot; ' + b.message : ''}</p>
-    ${lignes ? `<div class="scroll"><table>
-      <thead><tr><th>Collection</th><th class="num">Sorties</th>
-        <th class="num">Coût</th><th class="num">Profit</th>
-        <th class="num">Profitabilité</th><th class="num">P(gain)</th>
-        <th></th></tr></thead>
-      <tbody>${lignes}</tbody></table></div>
-      <p class="muted">${classes.length} sur ${b.results.length} affichés.
-      Classé par ${$('#bat-rank').selectedOptions[0].textContent}.
-      Montants en ${b.currency}. <b>P(gain)</b> est la probabilité que le tirage
-      rapporte plus que les entrées n’ont coûté.</p>`
-      : '<p class="muted">Aucun résultat pour l\u2019instant.</p>'}
+    <p class="muted">${b.results.length} rentable(s), ${b.rejected} écarté(s)
+      sous le point mort, ${b.failed.length} sans assez d’annonces &middot;
+      ${Math.round(b.elapsed / 60)} min écoulées &middot; montants en
+      ${b.currency}</p>
   </div>`;
+
+  if (!b.results.length) {
+    $('#resultats').innerHTML = fini
+      ? `<div class="card"><b>Aucun tradeup rentable dans cette rareté.</b>
+         <p class="muted">${b.computed} collections cotées, aucune ne rend plus
+         qu’elle ne coûte aux prix du moment. Ce n’est pas une panne, c’est le
+         résultat. Essayez une autre rareté, ou relancez plus tard — les prix
+         bougent, la réponse aussi.</p></div>`
+      : '';
+    return;
+  }
+
+  // Les plans arrivent au fil de l'eau : on charge le detail de chacun avant
+  // d'afficher, pour qu'une carte ne s'ouvre jamais sans sa liste d'achat.
+  const plans = await Promise.all(b.results.map(x => chargerPlan(x.plan_id)));
+  $('#resultats').innerHTML = b.results
+    .map((x, i) => carte(plans[i], x.plan_id, false)).join('');
 }
 
 document.addEventListener('click', async e => {
@@ -1525,8 +1394,9 @@ document.addEventListener('click', async e => {
     const r = await fetch('/api/plan/' + v.dataset.voir).then(x => x.json());
     if (r.error) { banniere(r.error, true); return; }
     document.querySelector('.tab[data-pane="calcul"]').click();
-    afficher({id: '', plan_id: v.dataset.voir, plan: r.plan, archive: true});
-    $('#sortie').scrollIntoView({behavior: 'smooth', block: 'start'});
+    $('#avancement').innerHTML = '';
+    $('#resultats').innerHTML = carte(r.plan, v.dataset.voir, true);
+    $('#resultats').scrollIntoView({behavior: 'smooth', block: 'start'});
     return;
   }
   const f = e.target.closest('[data-follow]');
@@ -1706,12 +1576,6 @@ function invDessiner() {
 }
 
 $('#inv-rank').addEventListener('change', invDessiner);
-$('#bat-rank').addEventListener('change', () => {
-  if (dernierBatch) dessinerBatch(dernierBatch);
-});
-$('#bat-profitables').addEventListener('change', () => {
-  if (dernierBatch) dessinerBatch(dernierBatch);
-});
 $('#inv-rarity').addEventListener('change', () => invApercu(false));
 $('#inv-relire').addEventListener('click', () => invApercu(true));
 $('#inv-calculer').addEventListener('click', async () => {
@@ -1731,8 +1595,6 @@ $('#inv-calculer').addEventListener('click', async () => {
 $('#tous').addEventListener('change', contrats);
 $('#rafraichir').addEventListener('click', contrats);
 $('#rarity').addEventListener('change', charger);
-$('#maxout').addEventListener('change', dessiner);
-$('#filtre').addEventListener('input', dessiner);
 charger();
 </script></body></html>
 """
