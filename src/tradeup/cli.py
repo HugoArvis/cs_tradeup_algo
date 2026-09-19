@@ -40,6 +40,18 @@ from .orders import (
     fill_estimate,
     scan_orders,
 )
+from .daily import (
+    DECISION_MAX_AGE,
+    DEFAULT_BUDGET,
+    DEFAULT_TOP,
+    Ligne,
+    Passage,
+    age_max,
+    historique,
+    journaliser,
+    noms_prioritaires,
+    recoter,
+)
 from .refresh import DEFAULT_DRIFT_THRESHOLD, collection_roles, refresh_quotes
 from .report import write_and_open
 from .scan import prefetch, required_market_names, scan
@@ -994,6 +1006,97 @@ def cmd_cache(args) -> int:
 # --- Point d'entree ----------------------------------------------------------
 
 
+def cmd_daily(args) -> int:
+    """Passage quotidien : recoter ce qui decide, classer, garder la trace.
+
+    L'ordre est deliberement celui-ci : on classe D'ABORD sur le cache (gratuit)
+    pour savoir OU depenser les requetes, on recote ensuite les candidats de
+    tete, puis on reclasse. Recoter avant de savoir quoi recoter reviendrait a
+    depenser le budget au hasard.
+    """
+    from pathlib import Path
+
+    db = SkinDatabase.load(args.db)
+    rarity = RARITY_ALIASES[args.rarity]
+    journal = Path(args.journal)
+
+    # --- 1. Classement sur le cache, pour savoir ou depenser ---
+    args.offline = True
+    pricer, cache = _make_pricer(args)
+    screen = ScreenConfig(min_ev_profit=-1e9, min_roi=-1.0,
+                          min_profit_probability=0.0,
+                          min_outcome_volume=args.min_volume or None,
+                          max_unpriced_probability=args.max_unpriced)
+    avant, _ = scan(db, pricer, rarity, screen=screen, ranking=Ranking.ROI,
+                    float_model=args.float_model, limit=None)
+
+    collections = {c.id: c for c in db.tradeable_collections(rarity)}
+    noms = noms_prioritaires(avant, collections, rarity, cache,
+                             top=args.top, budget=args.budget)
+    print(f"{len(avant)} candidats en cache, {len(noms)} cotations a rafraichir.",
+          file=sys.stderr)
+
+    # --- 2. Re-cotation, dans la limite du budget et de ce que Steam accepte ---
+    args.offline = False
+    frais_pricer, _ = _make_pricer(args)
+    source = frais_pricer.sell_source
+    recotes, epuise = recoter(source, noms, cache=cache,
+                              progress=_progress("recote"))
+    if epuise:
+        print(f"Marche ferme apres {recotes} cotations : le classement melange "
+              f"des prix frais et des prix plus anciens. La colonne age le dit.",
+              file=sys.stderr)
+
+    # --- 3. Reclassement, sur le cache mis a jour ---
+    args.offline = True
+    pricer2, cache2 = _make_pricer(args)
+    apres, stats = scan(db, pricer2, rarity, screen=screen, ranking=Ranking.ROI,
+                        float_model=args.float_model, limit=args.limit)
+
+    passage = Passage(rarity=args.rarity, recotes=recotes,
+                      budget=args.budget, epuise=epuise)
+    for cand in apres:
+        cid = next((i for i, c in collections.items() if c.name in cand.label), None)
+        col = collections.get(cid) if cid else None
+        passage.lignes.append(Ligne(
+            collection=cand.label,
+            cost=cand.result.cost,
+            ev_net=cand.result.ev_net,
+            profitability=cand.result.profitability,
+            profit_probability=cand.result.profit_probability,
+            age_max=age_max(col, rarity, cache2) if col else None,
+        ))
+
+    journaliser(passage, journal)
+
+    # --- 4. Restitution ---
+    print()
+    print(f"Passage du {datetime.now():%Y-%m-%d %H:%M} -- {args.rarity}")
+    print(f"{'collection':<38}{'cout':>7}{'EV':>7}{'profit.':>9}"
+          f"{'P(gain)':>9}{'age':>8}{'hier':>8}")
+    print("-" * 86)
+    for x in passage.lignes:
+        age = "jamais" if x.age_max is None else f"{x.age_max / 3600:.0f}h"
+        serie = historique(journal, x.collection, limite=2)
+        veille = f"{serie[0][1]:.0%}" if len(serie) > 1 else "-"
+        marque = "  <<" if x.actionnable else ("   ." if x.frais else "  !!")
+        print(f"{x.collection[:36]:<38}{x.cost:>7.2f}{x.ev_net:>7.2f}"
+              f"{x.profitability:>8.0%}{x.profit_probability:>9.0%}"
+              f"{age:>8}{veille:>8}{marque}")
+    print("-" * 86)
+    print(f"  <<  rentable ET prix de moins de {DECISION_MAX_AGE // 3600} h")
+    print("  !!  prix trop vieux pour decider")
+    print()
+    print(passage.resume())
+    print(f"Journal : {journal}")
+
+    cache.close()
+    cache2.close()
+    # Code 10 : de quoi declencher une alerte dans un planificateur sans avoir
+    # a relire la sortie.
+    return 10 if passage.actionnables else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="tradeup", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1241,6 +1344,38 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--api-key", default=None, help="cle CSFloat, sinon lue depuis .env")
     add_pricing_args(s)
     s.set_defaults(func=cmd_verify)
+
+    s = sub.add_parser("daily",
+                       help="passage quotidien : recote les candidats de tete, "
+                            "classe, et journalise la derive")
+    s.set_defaults(func=cmd_daily)
+    s.add_argument("--rarity", default="industrial", choices=sorted(RARITY_ALIASES))
+    s.add_argument("--top", type=int, default=DEFAULT_TOP,
+                   help="nombre de candidats dont les prix doivent etre frais "
+                        "a tout prix (defaut 5)")
+    s.add_argument("--budget", type=int, default=DEFAULT_BUDGET,
+                   help="cotations maximales par passage (defaut 200, cale sur "
+                        "ce qu'une fenetre Steam ouverte laisse passer)")
+    s.add_argument("--journal", default="data/passages.jsonl",
+                   help="fichier ou s'empile un enregistrement par passage")
+    s.add_argument("--limit", type=int, default=15)
+    s.add_argument("--min-volume", type=int, default=0)
+    s.add_argument("--max-unpriced", type=float, default=0.02)
+    s.add_argument("--min-input-volume", type=int, default=3)
+    s.add_argument("--margin", type=float, default=0.05)
+    s.add_argument("--float-model", default="random", choices=("fixed", "random"))
+    s.add_argument("--price-basis", default="sales", choices=("listing", "sales"),
+                   help="defaut 'sales' ici : un passage quotidien sert a "
+                        "decider, donc a raisonner sur ce que le marche negocie")
+    s.add_argument("--buy-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--sell-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--currency", default="EUR", choices=sorted(CURRENCIES))
+    s.add_argument("--rate", type=int, default=4,
+                   help="requetes Steam par minute (defaut 4 : au-dela, Steam "
+                        "ferme pour des heures)")
+    s.add_argument("--ttl", type=float, default=24,
+                   help="duree de validite du cache, en heures (defaut 24)")
+    s.add_argument("--db", default=None)
 
     s = sub.add_parser("cache", help="etat du cache de prix")
     s.add_argument("--prune", type=float, nargs="?", const=30.0, default=None,

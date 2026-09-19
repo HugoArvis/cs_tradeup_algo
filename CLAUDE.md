@@ -36,6 +36,7 @@ python -m tradeup.web                 # application locale, port 8765
 python -m tradeup.cli plan "The Bank Collection" --rarity industrial --html
 python -m tradeup.cli verify --collection "The Bank Collection" --rarity industrial
 python -m tradeup.cli orders --rarity mil-spec   # prix d'ordre d'achat a placer
+python -m tradeup.cli daily --rarity industrial  # passage quotidien, code 10 si actionnable
 ```
 
 Le raccourci `tradeup` n'est pas dans le `PATH` : passer par `python -m tradeup.cli`.
@@ -335,6 +336,22 @@ Deux conséquences qu'il ne faut pas défaire :
 - l'EV intégrée n'est plus constante par morceaux, donc l'optimiseur teste
   plusieurs reculs (0 à 3 σ) sous chaque frontière. La marge de sécurité devient
   une décision prise contrat par contrat, pas un réglage subi.
+
+**Un classement n'a pas un âge moyen, il a l'âge de son plus vieux prix.**
+D'où `daily` (module `daily`), qui n'est pas un scan de plus : il classe
+d'abord sur le cache — gratuit — pour savoir **où** dépenser les requêtes,
+recote les objets des `--top` meilleurs candidats du plus vieux prix au plus
+récent, puis reclasse. Recoter avant de savoir quoi recoter dépenserait le
+budget au hasard, et rafraîchir le 40e du classement ne change aucune décision.
+
+`Ligne.actionnable` exige **rentable ET prix de moins de 24 h**, les deux ou
+rien. Mesuré le 19 septembre 2026 : The Italy Collection ressortait à 94 % sur
+un cache de quelques jours et à **84 %** re-cotée en direct, le MP7 | Anodized
+Navy (FN) — un tiers des issues — ayant perdu **31 %** entre-temps. Le calcul
+était juste, les prix étaient morts. Un refus de Steam en cours de route
+n'interrompt pas le passage : il s'arrête avec ce qu'il a, et la colonne d'âge
+dit lesquelles des lignes sont fraîches. Code de sortie **10** si quelque chose
+est actionnable, de quoi alerter un planificateur sans relire la sortie.
 
 **Une dérive se lit du côté du portefeuille, pas du prix.** Une entrée qui
 renchérit et une sortie qui se déprécie sont toutes deux défavorables, avec des

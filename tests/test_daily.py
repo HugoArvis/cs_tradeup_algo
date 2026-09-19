@@ -1,0 +1,256 @@
+"""Tests du passage quotidien.
+
+Motivation mesuree : The Italy Collection ressortait a 94 % de profitabilite
+sur un cache de quelques jours, et a 84 % re-cotee en direct -- le MP7 |
+Anodized Navy (FN), un tiers des issues, avait perdu 31 % entre-temps. Le
+calcul etait juste, les prix etaient morts. Un classement n'a donc pas un age
+moyen : il a l'age de son plus vieux prix.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+
+import pytest
+
+from tradeup.daily import (
+    DECISION_MAX_AGE,
+    Ligne,
+    Passage,
+    age_max,
+    historique,
+    journaliser,
+    noms_prioritaires,
+    recoter,
+)
+from tradeup.db import SkinDatabase
+from tradeup.models import Rarity
+from tradeup.pricing.base import Quote
+from tradeup.pricing.cache import QuoteCache
+from tradeup.scoring import Candidate
+
+RAW_DB = {
+    "version": "test",
+    "collections": [
+        {
+            "id": "col_a", "name": "Collection A",
+            "skins": [
+                {"key": "a_in", "name": "Arme A", "rarity": "Industrial Grade",
+                 "min_float": 0.0, "max_float": 1.0},
+                {"key": "a_out", "name": "Sortie A", "rarity": "Mil-Spec Grade",
+                 "min_float": 0.0, "max_float": 1.0},
+            ],
+        },
+        {
+            "id": "col_b", "name": "Collection B",
+            "skins": [
+                {"key": "b_in", "name": "Arme B", "rarity": "Industrial Grade",
+                 "min_float": 0.0, "max_float": 1.0},
+                {"key": "b_out", "name": "Sortie B", "rarity": "Mil-Spec Grade",
+                 "min_float": 0.0, "max_float": 1.0},
+            ],
+        },
+    ],
+}
+
+
+@pytest.fixture
+def db():
+    return SkinDatabase.from_dict(RAW_DB)
+
+
+@pytest.fixture
+def cache(tmp_path):
+    c = QuoteCache(tmp_path / "p.db", ttl_seconds=10 ** 9)
+    yield c
+    c.close()
+
+
+def quote(nom, prix=1.0, age=0.0):
+    return Quote(market_hash_name=nom, source="steam", lowest_price=prix,
+                 median_price=prix, volume=50, currency="EUR",
+                 fetched_at=time.time() - age)
+
+
+# --- Ce qui rend une ligne actionnable ---------------------------------------
+
+
+def test_un_contrat_rentable_sur_prix_perimes_nest_pas_actionnable():
+    """Le coeur du module : rentable ET frais, ou rien.
+
+    94 % sur des prix de trois jours n'est pas une occasion, c'est une
+    hypothese -- et celle d'Italy valait 84 % une fois verifiee.
+    """
+    vieux = Ligne("A", 1.0, 1.2, 1.20, 0.8, age_max=5 * 24 * 3600)
+    assert vieux.profitability >= 1.0
+    assert not vieux.frais
+    assert not vieux.actionnable
+
+
+def test_un_contrat_frais_mais_perdant_nest_pas_actionnable():
+    frais = Ligne("A", 1.0, 0.84, 0.84, 0.5, age_max=600)
+    assert frais.frais and not frais.actionnable
+
+
+def test_les_deux_conditions_reunies():
+    bon = Ligne("A", 1.0, 1.1, 1.10, 0.9, age_max=DECISION_MAX_AGE - 1)
+    assert bon.actionnable
+
+
+def test_un_contrat_sans_aucun_prix_nest_jamais_actionnable():
+    """`age_max` a None veut dire "on ne sait pas", pas "c'est frais"."""
+    inconnu = Ligne("A", 1.0, 2.0, 2.0, 1.0, age_max=None)
+    assert not inconnu.frais and not inconnu.actionnable
+
+
+# --- Ou depenser le budget ---------------------------------------------------
+
+
+def candidat(label):
+    class FauxResultat:
+        cost = ev_net = profitability = profit_probability = 1.0
+
+    return Candidate(result=FauxResultat(), label=label, score=1.0)
+
+
+def test_le_budget_va_dabord_aux_meilleurs_candidats(db, cache):
+    """Rafraichir le dernier du classement ne change aucune decision."""
+    for nom in ("Arme A (Factory New)", "Sortie A (Factory New)"):
+        cache.put(quote(nom, age=10))          # deja frais
+    noms = noms_prioritaires(
+        [candidat("10x Collection A"), candidat("10x Collection B")],
+        {c.id: c for c in db.tradeable_collections(Rarity.INDUSTRIAL)},
+        Rarity.INDUSTRIAL, cache, top=1, budget=100,
+    )
+    # Tout le premier candidat passe avant quoi que ce soit du second.
+    premiers = [n for n in noms if "A" in n]
+    assert noms[:len(premiers)] == premiers
+
+
+def test_un_nom_jamais_cote_passe_avant_un_prix_recent(db, cache):
+    """Une sortie sans prix n'abaisse pas un candidat, elle l'empeche d'exister."""
+    cache.put(quote("Arme A (Factory New)", age=10))
+    noms = noms_prioritaires(
+        [candidat("10x Collection A")],
+        {c.id: c for c in db.tradeable_collections(Rarity.INDUSTRIAL)},
+        Rarity.INDUSTRIAL, cache, top=1, budget=100,
+    )
+    assert noms.index("Arme A (Factory New)") == len(noms) - 1
+
+
+def test_le_budget_est_respecte(db, cache):
+    noms = noms_prioritaires(
+        [candidat("10x Collection A"), candidat("10x Collection B")],
+        {c.id: c for c in db.tradeable_collections(Rarity.INDUSTRIAL)},
+        Rarity.INDUSTRIAL, cache, top=1, budget=3,
+    )
+    assert len(noms) == 3
+
+
+# --- Un marche qui se ferme en cours -----------------------------------------
+
+
+class MarcheQuiFerme:
+    name = "steam"
+
+    def __init__(self, avant_fermeture):
+        self.restant = avant_fermeture
+        self.appels = 0
+
+    def refresh(self, nom):
+        from tradeup.pricing.http import RateLimited
+
+        self.appels += 1
+        if self.restant <= 0:
+            raise RateLimited("429")
+        self.restant -= 1
+        return quote(nom)
+
+
+def test_un_refus_en_cours_de_route_garde_ce_qui_a_ete_obtenu(cache):
+    """Un classement partiellement rafraichi vaut mieux qu'un echec sec.
+
+    Les fenetres Steam se referment sans preavis ; abandonner le passage
+    rendrait la commande inutilisable les jours ou elle sert le plus.
+    """
+    marche = MarcheQuiFerme(avant_fermeture=3)
+    obtenus, epuise = recoter(marche, [f"Objet {i}" for i in range(10)], cache=cache)
+
+    assert obtenus == 3 and epuise is True
+    assert cache.get("Objet 0", "steam", ttl=10 ** 9) is not None
+    assert cache.get("Objet 5", "steam", ttl=10 ** 9) is None
+
+
+def test_sans_refus_tout_est_recote(cache):
+    marche = MarcheQuiFerme(avant_fermeture=99)
+    obtenus, epuise = recoter(marche, ["A", "B"], cache=cache)
+    assert obtenus == 2 and epuise is False
+
+
+# --- L'age d'un contrat ------------------------------------------------------
+
+
+def test_lage_dun_contrat_est_celui_de_son_plus_vieux_prix(db, cache):
+    """Le maximum, pas la moyenne : c'est la ligne perimee qui retourne un verdict."""
+    col = db.collection("col_a")
+    cache.put(quote("Arme A (Factory New)", age=60))
+    cache.put(quote("Sortie A (Factory New)", age=9 * 3600))
+    assert age_max(col, Rarity.INDUSTRIAL, cache) == pytest.approx(9 * 3600, rel=0.01)
+
+
+def test_un_contrat_sans_prix_na_pas_dage(db, cache):
+    assert age_max(db.collection("col_a"), Rarity.INDUSTRIAL, cache) is None
+
+
+# --- Le journal --------------------------------------------------------------
+
+
+def test_le_journal_rend_la_derive_lisible(tmp_path):
+    """Un contrat a 99 % puis 84 % n'est pas un contrat a 90 %."""
+    chemin = Path(tmp_path) / "passages.jsonl"
+    for prof in (0.99, 0.84):
+        p = Passage(rarity="industrial", recotes=10)
+        p.lignes.append(Ligne("The Italy Collection", 0.90, 0.85, prof, 0.67, 600))
+        journaliser(p, chemin)
+
+    serie = historique(chemin, "The Italy Collection")
+    assert [round(v, 2) for _, v in serie] == [0.99, 0.84]
+
+
+def test_le_journal_sempile_sans_ecraser(tmp_path):
+    chemin = Path(tmp_path) / "sous" / "dossier" / "p.jsonl"
+    for _ in range(3):
+        journaliser(Passage(rarity="industrial"), chemin)
+    assert len(chemin.read_text(encoding="utf-8").strip().splitlines()) == 3
+
+
+def test_une_ligne_de_journal_illisible_ne_casse_pas_la_lecture(tmp_path):
+    """Un fichier tronque par un arret brutal doit rester exploitable."""
+    chemin = Path(tmp_path) / "p.jsonl"
+    p = Passage(rarity="industrial")
+    p.lignes.append(Ligne("A", 1.0, 1.0, 1.0, 1.0, 60))
+    journaliser(p, chemin)
+    with chemin.open("a", encoding="utf-8") as f:
+        f.write('{"horodatage": tronq\n')
+    journaliser(p, chemin)
+
+    assert len(historique(chemin, "A")) == 2
+
+
+def test_le_resume_distingue_zero_candidat_dun_budget_epuise():
+    """Sinon "aucun contrat" est indiscernable d'un marche ferme."""
+    vide = Passage(rarity="industrial", recotes=200)
+    ferme = Passage(rarity="industrial", recotes=12, epuise=True)
+    assert "aucun contrat" in vide.resume() and "200 recotees" in vide.resume()
+    assert "budget epuise" in ferme.resume()
+
+
+def test_le_passage_serialise_lage_en_heures(tmp_path):
+    chemin = Path(tmp_path) / "p.jsonl"
+    p = Passage(rarity="industrial")
+    p.lignes.append(Ligne("A", 1.0, 1.0, 1.0, 1.0, age_max=9000))
+    journaliser(p, chemin)
+    d = json.loads(chemin.read_text(encoding="utf-8").splitlines()[0])
+    assert d["candidats"][0]["age_h"] == 2.5
