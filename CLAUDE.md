@@ -162,6 +162,28 @@ cesse d'être sensible au float (Steam ne le price pas, viser 0,001 plutôt que
 objet. Les deux côtés sont cotés en **USD** : mélanger les devises donne un
 nombre qui ressemble à un profit sans en être un.
 
+**Le prix DEMANDE n'est pas le prix NEGOCIE.** `lowest_price` est la plus
+basse annonce en cours, `median_price` la mediane des ventes recentes.
+`--price-basis sales` (et `sell_basis` cote `plan`, ou c'est le defaut)
+raisonne sur le second, via `Quote.realised_reference()`. L'ecart coupe dans
+les deux sens — mesuré sur le contrat Bank le 19 septembre 2026 : entrée
+G3SG1 Green Apple (MW) **0,09 vendu contre 0,11 demandé** (−18 %), sortie
+CZ75-Auto Tuxedo (FT) 0,24 contre 0,28, mais Galil Tuxedo (FT) 0,91 contre
+0,88. Le contrat passe de **81,5 % à 100 %** de profitabilité, tout l'écart
+venant de l'entrée.
+
+Deux limites qui interdisent d'en faire le défaut partout :
+- viser le prix négocié à l'ACHAT suppose un **ordre d'achat** qui attend
+  d'être servi. On ne clique pas sur une annonce à 0,09 quand la moins chère
+  est à 0,11 — c'est ce que la méthode échange contre son gain ;
+- c'est **instable** sur les petits montants. Le même contrat donnait 100 %
+  sur le cache de la veille et 87,3 % re-coté le lendemain, l'écart de 18 %
+  sur l'entrée ayant disparu. À 1 € de mise, un centime vaut 10 points.
+
+`market/pricehistory/` (la vraie moyenne sur 7 jours) répond **HTTP 400 sans
+session Steam connectée** : la médiane des ventes récentes est le meilleur
+substitut automatisable.
+
 **Aucune prime de bas float dans le calcul** — elle existe (+40 %) mais ce sont
 des prix demandés, rien ne dit qu'ils se concluent. Retenir la moins chère
 annonce nue du palier.

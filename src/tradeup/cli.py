@@ -151,6 +151,7 @@ def _make_pricer(args) -> tuple[MarketPricer, QuoteCache]:
         safety_margin=args.margin,
         min_volume=args.min_volume,
         min_input_volume=getattr(args, "min_input_volume", None),
+        price_basis=getattr(args, "price_basis", "listing"),
     )
     return pricer, cache
 
@@ -1075,6 +1076,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="marge minimale exigee avant la falaise d'usure")
     s.add_argument("--buy-fees", default="steam", choices=sorted(FEE_MODELS))
     s.add_argument("--sell-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--price-basis", default="listing",
+                   choices=("listing", "sales"),
+                   help="listing : plus basse annonce (ce qu'on paie en "
+                        "cliquant). sales : mediane des ventes recentes, "
+                        "c'est-a-dire ce que le marche negocie -- l'achat "
+                        "y suppose alors un ORDRE d'achat qui attend")
     s.add_argument("--buy-market", default="steam", choices=("steam", "csfloat"),
                    help="marche d'ACHAT des entrees : csfloat prend ses vrais "
                         "prix (utiliser avec --currency USD ; gros consommateur "
@@ -1136,6 +1143,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "on ne choisit pas ce qu'on possede deja)")
     s.add_argument("--buy-fees", default="steam", choices=sorted(FEE_MODELS))
     s.add_argument("--sell-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--price-basis", default="listing",
+                   choices=("listing", "sales"),
+                   help="listing : plus basse annonce (ce qu'on paie en "
+                        "cliquant). sales : mediane des ventes recentes, "
+                        "c'est-a-dire ce que le marche negocie -- l'achat "
+                        "y suppose alors un ORDRE d'achat qui attend")
     s.add_argument("--sell-market", default="steam", choices=("steam", "csfloat"),
                    help="marche ou l'on valorise entrees et sorties")
     s.add_argument("--api-key", default=None, help="sinon lue depuis .env")
@@ -1157,6 +1170,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--margin", type=float, default=0.05)
     s.add_argument("--buy-fees", default="steam", choices=sorted(FEE_MODELS))
     s.add_argument("--sell-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--price-basis", default="listing",
+                   choices=("listing", "sales"),
+                   help="listing : plus basse annonce (ce qu'on paie en "
+                        "cliquant). sales : mediane des ventes recentes, "
+                        "c'est-a-dire ce que le marche negocie -- l'achat "
+                        "y suppose alors un ORDRE d'achat qui attend")
     s.add_argument("--api-key", default=None)
     add_pricing_args(s)
     s.set_defaults(func=cmd_knife)
@@ -1182,6 +1201,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--margin", type=float, default=0.05)
     s.add_argument("--buy-fees", default="steam", choices=sorted(FEE_MODELS))
     s.add_argument("--sell-fees", default="steam", choices=sorted(FEE_MODELS))
+    s.add_argument("--price-basis", default="listing",
+                   choices=("listing", "sales"),
+                   help="listing : plus basse annonce (ce qu'on paie en "
+                        "cliquant). sales : mediane des ventes recentes, "
+                        "c'est-a-dire ce que le marche negocie -- l'achat "
+                        "y suppose alors un ORDRE d'achat qui attend")
     s.add_argument("--api-key", default=None)
     add_pricing_args(s)
     s.set_defaults(func=cmd_orders)

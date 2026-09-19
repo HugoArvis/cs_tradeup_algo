@@ -44,7 +44,8 @@ class CSFloatPricer:
                  safety_margin: float = 0.05, listings_limit: int = 50,
                  sell_source: PriceSource | None = None,
                  sell_fees: FeeModel | None = None,
-                 sell_to_usd: float = 1.0):
+                 sell_to_usd: float = 1.0,
+                 sell_basis: str = "sales"):
         self.source = source
         self.sell_fee = sell_fee
         self.safety_margin = safety_margin
@@ -66,6 +67,14 @@ class CSFloatPricer:
         # facons de compter atteint plusieurs points -- exactement la ou le
         # plancher decide. On convertit donc APRES les frais, jamais avant.
         self.sell_to_usd = sell_to_usd
+        # Sur quel prix de revente raisonner. "sales" retient la mediane des
+        # ventes recentes -- ce que le marche NEGOCIE -- plutot que la plus
+        # basse annonce en cours, qui n'est qu'une esperance de vendeur. C'est
+        # la lecture des guides, et elle coupe dans les deux sens : mesure sur
+        # les sorties Bank, le CZ75-Auto Tuxedo (FT) s'affichait 0,28 mais se
+        # vendait 0,24. Ici l'achat ne subit aucune contrepartie -- on achete
+        # des annonces CSFloat reelles, au prix affiche.
+        self.sell_basis = sell_basis
         self._ventes: dict[str, Quote | None] = {}
 
     def _listings(self, name: str) -> list[tuple[float, float]]:
@@ -156,7 +165,10 @@ class CSFloatPricer:
         q = self._quote_de_vente(name)
         if q is None:
             return None
-        affiche = q.sell_reference()
+        affiche = (
+            q.realised_reference() if self.sell_basis == "sales"
+            else q.sell_reference()
+        )
         if affiche is None:
             return None
         # `net_from_sale` du modele Steam reproduit l'arrondi reel, plancher de
@@ -392,6 +404,7 @@ def build_plan(
     sell_source: PriceSource | None = None,
     sell_fees: FeeModel | None = None,
     sell_to_usd: float = 1.0,
+    sell_basis: str = "sales",
 ) -> Plan | None:
     """Construit le meilleur panier realisable avec ce qui est en vente.
 
@@ -438,7 +451,7 @@ def build_plan(
 
     pricer = CSFloatPricer(source, sell_fee=sell_fee, safety_margin=safety_margin,
                            sell_source=sell_source, sell_fees=sell_fees,
-                           sell_to_usd=sell_to_usd)
+                           sell_to_usd=sell_to_usd, sell_basis=sell_basis)
     outcomes_map = {collection.id: outcomes}
 
     meilleur: Plan | None = None

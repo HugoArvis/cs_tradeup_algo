@@ -32,6 +32,16 @@ class MarketPricer:
             surtout il faut en reunir DIX : le prix affiche sur une annonce
             unique ne dit rien du cout des neuf suivantes.
         stattrak_supported: si False, toute demande StatTrak renvoie None.
+        price_basis: sur quel prix raisonner.
+            "listing" (defaut) -- la plus basse annonce en cours a l'achat, la
+                plus prudente des deux references a la revente. C'est ce qu'on
+                paie en cliquant, et ce qu'il faut battre pour vendre vite.
+            "sales" -- la mediane des ventes recentes des deux cotes, c'est-a-
+                dire ce que le marche NEGOCIE. Plus juste, mais l'achat y
+                suppose un ORDRE d'achat qui attend d'etre servi : on ne peut
+                pas acheter a 0,09 quand la moins chere annonce est a 0,11.
+                Sur le contrat Bank, l'ecart entre les deux bases vaut 18
+                points de profitabilite -- entierement porte par l'entree.
     """
 
     def __init__(
@@ -45,6 +55,7 @@ class MarketPricer:
         min_volume: int | None = None,
         min_input_volume: int | None = None,
         conservative_sell: bool = True,
+        price_basis: str = "listing",
     ):
         self.buy_source = buy_source
         self.sell_source = sell_source or buy_source
@@ -54,6 +65,9 @@ class MarketPricer:
         self.min_volume = min_volume
         self.min_input_volume = min_input_volume
         self.conservative_sell = conservative_sell
+        if price_basis not in ("listing", "sales"):
+            raise ValueError(f"price_basis inconnu : {price_basis}")
+        self.price_basis = price_basis
         self._quotes: dict[tuple[str, str], Quote | None] = {}
         self._volume_unknown: set[str] = set()
         self._illiquid_inputs: set[str] = set()
@@ -64,7 +78,10 @@ class MarketPricer:
         q = self._quote(self.sell_source, skin, wear, stattrak)
         if q is None:
             return None
-        listed = q.sell_reference(conservative=self.conservative_sell)
+        listed = (
+            q.realised_reference() if self.price_basis == "sales"
+            else q.sell_reference(conservative=self.conservative_sell)
+        )
         if listed is None:
             return None
         if self.min_volume is not None and q.volume is not None:
@@ -82,7 +99,10 @@ class MarketPricer:
         q = self._quote(self.buy_source, skin, wear, stattrak)
         if q is None:
             return None
-        listed = q.buy_reference()
+        listed = (
+            q.realised_reference() if self.price_basis == "sales"
+            else q.buy_reference()
+        )
         if listed is None:
             return None
         if self.min_input_volume is not None and q.volume is not None:

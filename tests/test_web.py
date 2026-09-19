@@ -443,3 +443,24 @@ def test_un_compte_en_dollars_est_une_reponse_pas_un_defaut(app, monkeypatch):
     app.load_currency()
 
     assert app.currency == "USD" and app.currency_known is True
+
+
+def test_la_base_de_prix_ventes_change_le_verdict(app):
+    """La methode des guides appliquee de bout en bout.
+
+    Mesure sur le contrat Bank : achete a la plus basse annonce il ressort a
+    81,5 % ; achete au prix reellement negocie, a 100 %. Tout l'ecart vient
+    d'une seule entree, vendue 0,09 quand elle etait affichee 0,11.
+    """
+    from tradeup.fees import steam_net_proceeds
+    from tradeup.pricing.base import Quote
+
+    q = Quote(market_hash_name="X", source="steam", lowest_price=0.11,
+              median_price=0.09, volume=83, currency="EUR")
+    assert q.buy_reference() == 0.11
+    assert q.realised_reference() == 0.09
+
+    sorties = [(1.87, 1.88), (0.93, 0.93), (0.28, 0.28)]
+    ev = sum(steam_net_proceeds(m) for _, m in sorties) / 3
+    assert ev / (0.11 * 10) == pytest.approx(0.815, abs=0.01)
+    assert ev / (0.09 * 10) == pytest.approx(1.00, abs=0.01)

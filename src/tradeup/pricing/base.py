@@ -32,6 +32,24 @@ class Quote:
         """Prix retenu pour ACHETER : la meilleure offre disponible."""
         return self.lowest_price if self.lowest_price is not None else self.median_price
 
+    def realised_reference(self) -> float | None:
+        """Prix auquel l'objet se NEGOCIE reellement, pas celui qu'on demande.
+
+        `median_price` est la mediane des ventes recentes : des transactions
+        conclues, pas des esperances de vendeur. L'ecart avec la plus basse
+        annonce porte l'essentiel de la marge en bas de gamme -- mesure sur le
+        G3SG1 Green Apple (MW), 0,09 vendu contre 0,11 demande, soit 18 % du
+        cout d'entree et 18 points de profitabilite sur le contrat Bank.
+
+        A l'ACHAT, viser ce prix suppose un ORDRE d'achat : on ne clique pas
+        sur une annonce a 0,09 quand la moins chere est a 0,11, on se met dans
+        la file et on attend. C'est ce que la methode echange contre son gain.
+
+        Repli sur l'annonce si aucune vente n'est publiee : un objet sans
+        historique n'est pas un objet gratuit.
+        """
+        return self.median_price if self.median_price is not None else self.lowest_price
+
     def sell_reference(self, conservative: bool = True) -> float | None:
         """Prix retenu pour VENDRE.
 

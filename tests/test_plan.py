@@ -268,3 +268,83 @@ def test_sans_conversion_le_net_reste_dans_la_devise_dorigine():
     pricer, _ = _pricer({nom: 0.08})
     assert pricer.sell_to_usd == 1.0
     assert pricer.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(0.06)
+
+
+# --- Prix demande contre prix negocie ----------------------------------------
+# La methode des guides : ce qui compte n'est pas ce qu'un vendeur DEMANDE,
+# c'est ce a quoi les transactions se CONCLUENT. Les deux chiffres divergent,
+# et pas toujours dans le meme sens.
+
+
+class MarcheAvecHistorique(FauxMarcheDeVente):
+    """Source distinguant la plus basse annonce du prix median des ventes."""
+
+    def __init__(self, annonces: dict[str, float], ventes: dict[str, float]):
+        super().__init__(annonces)
+        self.ventes = ventes
+
+    def fetch(self, market_hash_name: str, *, use_cache: bool = True):
+        from tradeup.pricing.base import Quote
+
+        self.appels.append(market_hash_name)
+        if market_hash_name not in self.prix:
+            return None
+        return Quote(market_hash_name=market_hash_name, source="faux",
+                     lowest_price=self.prix[market_hash_name],
+                     median_price=self.ventes.get(market_hash_name),
+                     volume=50, currency="EUR")
+
+
+def _pricer_historique(annonces, ventes, basis):
+    from tradeup.fees import STEAM
+    from tradeup.plan import CSFloatPricer
+
+    marche = MarcheAvecHistorique(annonces, ventes)
+    return CSFloatPricer(source=None, safety_margin=0.0, sell_source=marche,
+                         sell_fees=STEAM, sell_basis=basis)
+
+
+def test_la_base_ventes_retient_le_prix_negocie_pas_le_prix_demande():
+    """Mesure sur une sortie Bank : affichee 0,28, vendue 0,24."""
+    from tradeup.fees import steam_net_proceeds
+
+    nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
+    ventes = _pricer_historique({nom: 0.28}, {nom: 0.24}, "sales")
+    annonces = _pricer_historique({nom: 0.28}, {nom: 0.24}, "listing")
+
+    assert ventes.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(
+        steam_net_proceeds(0.24))
+    # En base "listing" on retient la plus prudente des deux, donc 0,24 aussi
+    # ici : `sell_reference` prend le minimum. La difference se voit quand le
+    # prix negocie est SUPERIEUR au prix demande.
+    assert annonces.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(
+        steam_net_proceeds(0.24))
+
+
+def test_un_prix_negocie_superieur_a_l_annonce_distingue_les_deux_bases():
+    """Le Galil Tuxedo se vendait 0,91 alors qu'il s'affichait 0,88.
+
+    La base prudente retient 0,88, la base "ventes" retient 0,91 : ignorer
+    l'ecart sous-estime la revente au lieu de la surestimer, mais c'est une
+    erreur quand meme.
+    """
+    from tradeup.fees import steam_net_proceeds
+
+    nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
+    ventes = _pricer_historique({nom: 0.88}, {nom: 0.91}, "sales")
+    annonces = _pricer_historique({nom: 0.88}, {nom: 0.91}, "listing")
+
+    assert ventes.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(
+        steam_net_proceeds(0.91))
+    assert annonces.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(
+        steam_net_proceeds(0.88))
+
+
+def test_sans_historique_de_vente_on_retombe_sur_l_annonce():
+    """Un objet jamais vendu n'est pas un objet gratuit."""
+    from tradeup.fees import steam_net_proceeds
+
+    nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
+    p = _pricer_historique({nom: 0.50}, {}, "sales")
+    assert p.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(
+        steam_net_proceeds(0.50))
