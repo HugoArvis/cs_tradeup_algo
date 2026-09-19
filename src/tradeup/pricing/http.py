@@ -55,7 +55,7 @@ class HttpClient:
         self,
         *,
         rate_limiter: RateLimiter | None = None,
-        user_agent: str = "cs-tradeup-algo/0.1",
+        user_agent: str | None = None,
         timeout: float = 20.0,
         max_retries: int = 4,
         backoff_base: float = 5.0,
@@ -65,7 +65,21 @@ class HttpClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.backoff_base = backoff_base
-        self.headers = {"User-Agent": user_agent, "Accept": "application/json"}
+        self.headers = {"Accept": "application/json"}
+        # On laisse urllib annoncer son propre nom. Ce n'est pas un detail de
+        # politesse : Steam repond 429 a tout User-Agent qu'il ne reconnait
+        # pas -- teste sur "cs-tradeup-algo/0.1", sur une chaine quelconque,
+        # sur un mot isole et sur la chaine vide, tous refuses des la PREMIERE
+        # requete, quand "Python-urllib/3.x" passe au meme instant. Le 429
+        # n'avait donc rien d'un quota : deux heures d'attente n'y changeaient
+        # rien, et le message d'erreur envoyait chercher un probleme de debit
+        # la ou il fallait lire un en-tete.
+        #
+        # Declarer urllib est exact -- c'est bien lui qui emet la requete --
+        # et ne se fait pas passer pour un navigateur. Le limiteur de debit
+        # reste en place : il ne s'agit pas de taper plus vite.
+        if user_agent:
+            self.headers["User-Agent"] = user_agent
         if headers:
             self.headers.update(headers)
 
