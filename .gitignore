@@ -20,3 +20,9 @@ rapports/
 
 # Journal : donnees personnelles (achats, contrats)
 data/journal.db
+
+# Journal des passages quotidiens : serie de mesures locale, propre a une
+# machine et a une periode. Elle ne se partage pas -- et c'est sa continuite
+# qui fait sa valeur, pas son contenu a un instant donne.
+data/passages.jsonl
+data/passages.log
