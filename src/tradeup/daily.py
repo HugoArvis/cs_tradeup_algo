@@ -164,15 +164,24 @@ def recoter(
     Un refus de Steam n'est pas une erreur a propager : le passage s'arrete
     avec ce qu'il a. Mieux vaut un classement partiellement rafraichi, qui dit
     l'age de chaque ligne, qu'un echec qui ne rafraichit rien.
+
+    Une coupure reseau est traitee de la meme facon. La distinction entre
+    "le marche refuse" et "la machine n'a plus de reseau" n'interesse personne
+    a cet instant : dans les deux cas le passage s'arrete, garde ses
+    cotations, et la colonne d'age dit lesquelles sont fraiches. Laisser
+    remonter l'erreur ferait perdre tout le travail deja paye.
     """
+    import urllib.error
+
     from .pricing.http import RateLimited
 
     obtenus = 0
     for i, nom in enumerate(noms, 1):
         try:
             q = source.refresh(nom)
-        except RateLimited:
-            log.info("Marche ferme apres %d cotations sur %d", obtenus, len(noms))
+        except (RateLimited, urllib.error.URLError) as exc:
+            cause = "Marche ferme" if isinstance(exc, RateLimited) else "Reseau coupe"
+            log.info("%s apres %d cotations sur %d", cause, obtenus, len(noms))
             return obtenus, True
         if q is not None:
             obtenus += 1

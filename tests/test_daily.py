@@ -254,3 +254,36 @@ def test_le_passage_serialise_lage_en_heures(tmp_path):
     journaliser(p, chemin)
     d = json.loads(chemin.read_text(encoding="utf-8").splitlines()[0])
     assert d["candidats"][0]["age_h"] == 2.5
+
+
+class MarcheSansReseau:
+    """Le DNS tombe en cours de passage -- machine qui change de reseau."""
+
+    name = "steam"
+
+    def __init__(self, avant_coupure):
+        self.restant = avant_coupure
+
+    def refresh(self, nom):
+        import urllib.error
+
+        if self.restant <= 0:
+            raise urllib.error.URLError("[Errno 11001] getaddrinfo failed")
+        self.restant -= 1
+        return quote(nom)
+
+
+def test_une_coupure_reseau_garde_ce_qui_a_ete_obtenu(cache):
+    """Meme traitement qu'un refus du marche, et pour la meme raison.
+
+    La distinction n'interesse personne a cet instant : dans les deux cas le
+    passage s'arrete avec ses cotations, et la colonne d'age dit lesquelles
+    sont fraiches. Laisser remonter l'erreur ferait perdre tout le travail
+    deja paye -- c'est ce qui est arrive a un balayage de deux heures, tue
+    par une minute sans DNS.
+    """
+    obtenus, epuise = recoter(MarcheSansReseau(avant_coupure=4),
+                              [f"Objet {i}" for i in range(10)], cache=cache)
+
+    assert obtenus == 4 and epuise is True
+    assert cache.get("Objet 3", "steam", ttl=10 ** 9) is not None

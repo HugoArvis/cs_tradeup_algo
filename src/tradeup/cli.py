@@ -13,6 +13,7 @@ import argparse
 import logging
 import os
 import sys
+import urllib.error
 from datetime import datetime
 from pathlib import Path
 
@@ -1500,6 +1501,19 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
         return 3
+    except urllib.error.URLError as exc:
+        # Une coupure reseau n'est pas une erreur de programme, et surtout pas
+        # une raison d'abandonner : le travail est REPRENABLE depuis le cache.
+        # Un long balayage mourait avec une trace Python parce que la machine
+        # avait change de reseau -- deux heures de fenetre Steam perdues pour
+        # une minute sans DNS.
+        print(file=sys.stderr)
+        print(f"Connexion indisponible ({exc.reason}).", file=sys.stderr)
+        print("  Les cotations deja obtenues sont en cache : la reprise "
+              "repart de la,", file=sys.stderr)
+        print("  rien n'est reperdu. Relance quand le reseau est revenu.",
+              file=sys.stderr)
+        return 4
     except FileNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
