@@ -283,3 +283,26 @@ def test_un_429_csfloat_garde_son_message(capsys):
     err = capsys.readouterr().err
     assert code == 3
     assert "CSFloat" in err
+
+
+def test_le_ttl_demande_atteint_la_source_pas_seulement_le_cache():
+    """Regle : c'est la SOURCE qui juge une cotation perimee, pas le cache.
+
+    `QuoteCache` conserve tout ; a chaque lecture la source lui impose son
+    propre TTL. Tant que `--ttl` n'arrivait qu'au cache, la source gardait son
+    defaut de 6 h et redemandait des prix deja acquis -- un scan brulait son
+    budget Steam a recoter les memes 813 noms sans jamais atteindre les 865
+    manquants, en affichant une progression normale.
+    """
+    faux = types.SimpleNamespace(
+        ttl=168, currency="EUR", rate=4, offline=False, margin=0.05,
+        min_volume=0, min_input_volume=3, buy_fees="steam", sell_fees="steam",
+        buy_market="steam", sell_market="steam", price_basis="listing",
+    )
+    pricer, cache = cli._make_pricer(faux)
+
+    assert pricer.buy_source.ttl == 168 * 3600
+    assert pricer.sell_source.ttl == 168 * 3600
+    # Le cache porte la meme duree : les deux doivent s'accorder, sinon l'un
+    # purge ce que l'autre croit encore valable.
+    assert cache.ttl == 168 * 3600

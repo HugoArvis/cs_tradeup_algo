@@ -75,6 +75,13 @@ def _make_pricer(args) -> tuple[MarketPricer, QuoteCache]:
         cache=cache,
         calls_per_minute=args.rate,
         offline=args.offline,
+        # Sans ce passage explicite, la source garde son defaut de 6 h et
+        # ignore --ttl : le cache conservait bien les cotations, la source les
+        # jugeait perimees et les redemandait. Un scan brulait alors tout son
+        # budget Steam a recoter ce qu'il possedait deja, sans jamais
+        # atteindre les noms manquants -- bloque a 813 sur 1678 pendant des
+        # heures, en apparence "en cours".
+        ttl_seconds=args.ttl * 3600,
     )
 
     partage: list[CSFloat] = []
@@ -109,6 +116,7 @@ def _make_pricer(args) -> tuple[MarketPricer, QuoteCache]:
         source = CSFloat(
             key,
             cache=cache,
+            ttl_seconds=args.ttl * 3600,
             calls_per_minute=getattr(args, "csfloat_rate", 10),
             offline=getattr(args, "offline", False),
             with_volume=getattr(args, "csfloat_volume", False),
@@ -432,7 +440,9 @@ def cmd_plan(args) -> int:
 
 def cmd_price(args) -> int:
     cache = QuoteCache(ttl_seconds=args.ttl * 3600)
-    steam = SteamMarket(currency=args.currency, cache=cache, calls_per_minute=args.rate)
+    steam = SteamMarket(currency=args.currency, cache=cache,
+                        calls_per_minute=args.rate,
+                        ttl_seconds=getattr(args, "ttl", 6) * 3600)
     q = steam.refresh(args.name) if args.fresh else steam.fetch(args.name)
     if q is None:
         print(f"Aucun prix pour {args.name!r}", file=sys.stderr)
@@ -897,7 +907,8 @@ def cmd_verify(args) -> int:
         source = CSFloat(key, cache=cache, calls_per_minute=args.rate)
     else:
         source = SteamMarket(currency=args.currency, cache=cache,
-                             calls_per_minute=args.rate)
+                             calls_per_minute=args.rate,
+                             ttl_seconds=getattr(args, "ttl", 6) * 3600)
 
     roles: dict[str, str] = {}
     names = list(args.names)

@@ -351,6 +351,15 @@ sur ce segment : 98 et 83 ventes/jour sur Steam contre 8 et 10 sur CSFloat.
 CSFloat ne l'emporte que sur un point, décisif si l'objectif est de sortir de
 l'argent : son porte-monnaie est retirable, pas celui de Steam.
 
+**Le TTL se decide dans la SOURCE, pas dans le cache.** `QuoteCache`
+conserve tout ; a chaque lecture `SteamMarket`/`CSFloat` lui impose son propre
+`ttl_seconds` (6 h et 3 h par defaut). Tant que `--ttl` n'arrivait qu'au cache,
+la source gardait son defaut et redemandait des prix deja acquis : un scan
+Industrial a passe des heures a recoter les memes 813 noms sans jamais
+atteindre les 865 manquants, en affichant une progression parfaitement
+normale. Le budget Steam etant la ressource rare, le scan ne pouvait pas
+aboutir — jamais par erreur visible, toujours par epuisement.
+
 **Hors ligne, le TTL du cache est ignoré : un prix de six semaines est servi
 sans un mot** et donne un scan d'apparence normale, entièrement faux. Mesuré :
 un Tec-9 | Brother (Factory New) affiché à 12,97 € par un cache de 42 jours en
