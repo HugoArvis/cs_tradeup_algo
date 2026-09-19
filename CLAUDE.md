@@ -348,6 +348,18 @@ Le quota CSFloat porte sur une fenêtre longue, pas seulement par minute. Un 429
 persistant ne se réessaie pas, il s'attend — `web.Batch` met en pause 10 min
 sans retirer la collection de la file.
 
+**Steam refuse tout `User-Agent` qu'il ne reconnaît pas** — 429 dès la
+*première* requête, sans rapport avec le débit. Mesuré le 19 septembre 2026 sur
+cinq chaînes (`cs-tradeup-algo/0.1`, la forme `Mozilla/5.0 (compatible; ...)`,
+une chaîne quelconque, un mot isolé, la chaîne vide) : toutes refusées à
+l'instant où `Python-urllib/3.x` passait. `HttpClient` n'en envoie donc plus
+aucun par défaut. Le piège est qu'un tel 429 **ressemble à un quota** : deux
+heures d'attente et six reprises automatiques n'y ont rien changé, et chaque
+tentative mourait en 80 secondes sur la première cotation non mise en cache.
+
+Steam renvoie par ailleurs `success=true` **sans aucun champ de prix** pour un
+objet sans annonce : `Quote.is_empty` distingue ce cas d'une erreur.
+
 Steam limite à ~15 req/min et ne donne aucun float. `SteamMarket.order_book()`
 est mort, mais pas pour la raison qu'on croit : **l'endpoint
 `itemordershistogram` répond toujours** (`success=1`, `highest_buy_order`
