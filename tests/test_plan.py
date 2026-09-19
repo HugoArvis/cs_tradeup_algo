@@ -238,3 +238,33 @@ def test_sans_marche_de_vente_le_comportement_dorigine_est_conserve():
     pricer = CSFloatPricer(source=None, sell_fee=0.02, safety_margin=0.0)
     pricer._book[SKIN.market_hash_name(Wear.FACTORY_NEW)] = [(0.01, 10.0)]
     assert pricer.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(9.8)
+
+
+def test_les_frais_sappliquent_avant_la_conversion_de_devise():
+    """Le plancher de Steam vaut 0,01 dans la devise ou l'on encaisse.
+
+    Convertir d'abord puis appliquer les frais deplace le plancher, et le
+    deplace precisement la ou il decide : en bas de l'echelle.
+    """
+    from tradeup.fees import STEAM, steam_net_proceeds
+
+    nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
+    eur_vers_usd = 1 / 0.92
+    pricer, _ = _pricer({nom: 0.08})
+    pricer.sell_to_usd = eur_vers_usd
+
+    # 0,08 EUR -> 0,06 EUR net -> converti ensuite.
+    attendu = steam_net_proceeds(0.08) * eur_vers_usd
+    assert pricer.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(attendu)
+
+    # L'ordre inverse donnerait un autre chiffre : c'est bien un choix, pas
+    # une equivalence.
+    a_lenvers = STEAM.net_from_sale(0.08 * eur_vers_usd)
+    assert a_lenvers != pytest.approx(attendu, rel=0.01)
+
+
+def test_sans_conversion_le_net_reste_dans_la_devise_dorigine():
+    nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
+    pricer, _ = _pricer({nom: 0.08})
+    assert pricer.sell_to_usd == 1.0
+    assert pricer.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(0.06)

@@ -43,7 +43,8 @@ class CSFloatPricer:
     def __init__(self, source: CSFloat, *, sell_fee: float = 0.02,
                  safety_margin: float = 0.05, listings_limit: int = 50,
                  sell_source: PriceSource | None = None,
-                 sell_fees: FeeModel | None = None):
+                 sell_fees: FeeModel | None = None,
+                 sell_to_usd: float = 1.0):
         self.source = source
         self.sell_fee = sell_fee
         self.safety_margin = safety_margin
@@ -59,6 +60,12 @@ class CSFloatPricer:
         # A ces montants-la, les frais ne rognent pas le gain, ils le mangent.
         self.sell_source = sell_source
         self.sell_fees = sell_fees or STEAM
+        # Le marche de revente cote dans SA devise, et les frais s'y appliquent
+        # dans SA devise : le plancher de Steam est de 0,01 EUR sur un compte
+        # en euros, pas de 0,01 USD converti. A 0,08 l'ecart entre les deux
+        # facons de compter atteint plusieurs points -- exactement la ou le
+        # plancher decide. On convertit donc APRES les frais, jamais avant.
+        self.sell_to_usd = sell_to_usd
         self._ventes: dict[str, Quote | None] = {}
 
     def _listings(self, name: str) -> list[tuple[float, float]]:
@@ -155,7 +162,8 @@ class CSFloatPricer:
         # `net_from_sale` du modele Steam reproduit l'arrondi reel, plancher de
         # 0.01 par frais compris. Un pourcentage moyen ne le remplacerait pas :
         # c'est precisement en bas de l'echelle que l'ecart devient decisif.
-        return self.sell_fees.net_from_sale(affiche) * (1 - self.safety_margin)
+        net = self.sell_fees.net_from_sale(affiche)
+        return net * self.sell_to_usd * (1 - self.safety_margin)
 
     def sell_net_at_float(
         self, skin, wear, stattrak: bool, float_value: float
@@ -383,6 +391,7 @@ def build_plan(
     float_margin: float = 0.005,
     sell_source: PriceSource | None = None,
     sell_fees: FeeModel | None = None,
+    sell_to_usd: float = 1.0,
 ) -> Plan | None:
     """Construit le meilleur panier realisable avec ce qui est en vente.
 
@@ -395,6 +404,11 @@ def build_plan(
     revend la ou l'on a achete. Avec lui (typiquement Steam), la sortie est
     cotee sur ce marche et nette de SES frais : c'est la seule facon de dire si
     un contrat rapporte, puisque c'est ce qu'on encaisse qui compte.
+
+    `sell_to_usd` ramene ce produit de vente dans la devise des couts. Les
+    frais s'appliquent AVANT la conversion : le plancher de Steam vaut 0,01
+    dans la devise du compte, et l'appliquer sur un montant converti le
+    deplacerait de quelques points juste la ou il decide.
 
     `float_margin` protege d'un risque different de celui du scan Steam. Ici les
     floats sont connus : il n'y a pas de tirage. Mais les 10 annonces sont des
@@ -423,7 +437,8 @@ def build_plan(
         return None
 
     pricer = CSFloatPricer(source, sell_fee=sell_fee, safety_margin=safety_margin,
-                           sell_source=sell_source, sell_fees=sell_fees)
+                           sell_source=sell_source, sell_fees=sell_fees,
+                           sell_to_usd=sell_to_usd)
     outcomes_map = {collection.id: outcomes}
 
     meilleur: Plan | None = None

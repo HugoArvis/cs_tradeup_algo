@@ -168,11 +168,16 @@ class App:
         self._lock = threading.Lock()
         # On achete sur CSFloat (annonces avec float exact, prix bruts plus
         # bas) et on revend sur Steam (net superieur de 17 a 37 % malgre des
-        # frais six fois plus eleves, et dix fois plus de volume). Les deux
-        # cotes doivent etre dans la MEME devise : additionner un cout en USD
-        # et un produit de vente en EUR donne un nombre qui ressemble a un
-        # profit sans en etre un. L'API CSFloat cotant en USD, Steam est
-        # interroge en USD et `conv()` convertit a l'affichage.
+        # frais six fois plus eleves, et dix fois plus de volume).
+        #
+        # Steam est interroge dans la devise du COMPTE, pas en USD, pour deux
+        # raisons : ses frais ont un plancher de 0,01 qui doit s'appliquer
+        # dans la devise ou l'on encaisse, et le cache de prix est indexe par
+        # devise -- coter en USD rendrait inutilisables toutes les cotations
+        # deja obtenues. Le net est converti en USD APRES les frais, pour
+        # rejoindre les couts CSFloat : additionner un cout en USD et un
+        # produit de vente en EUR donne un nombre qui ressemble a un profit
+        # sans en etre un.
         self._revente: SteamMarket | None = None
         # L'API CSFloat cote en USD, mais le site affiche -- et facture -- dans
         # la devise du profil. Sans conversion, les montants ne correspondent a
@@ -212,10 +217,11 @@ class App:
         emettraient donc le double du rythme annonce, ce qui est exactement ce
         qui fait fermer la porte cote Steam.
         """
+        self.load_currency()
         with self._lock:
             if self._revente is None:
                 self._revente = SteamMarket(
-                    currency="USD",
+                    currency=self.currency,
                     cache=QuoteCache(ttl_seconds=6 * 3600),
                     calls_per_minute=15,
                 )
@@ -411,7 +417,8 @@ class App:
             col = self.db.collection(job.collection_id)
             source = CSFloat(self._api_key, calls_per_minute=self.rate)
             plan = build_plan(self.db, col, RARITES[job.rarity], source,
-                              sell_source=self.revente(), sell_fees=STEAM)
+                              sell_source=self.revente(), sell_fees=STEAM,
+                              sell_to_usd=1.0 / self.rate_usd)
             if plan is None:
                 job.state = "empty"
                 job.message = "Pas assez d'annonces en vente pour composer un panier."
@@ -469,7 +476,8 @@ class App:
             col = self.db.collection(cid)
             try:
                 plan = build_plan(self.db, col, RARITES[batch.rarity], source,
-                                  sell_source=self.revente(), sell_fees=STEAM)
+                                  sell_source=self.revente(), sell_fees=STEAM,
+                                  sell_to_usd=1.0 / self.rate_usd)
             except RateLimited:
                 # On NE retire PAS la collection de la file : le quota reviendra
                 # et elle sera retentee. Perdre une collection parce que l'API a
