@@ -52,6 +52,7 @@ from .daily import (
     noms_prioritaires,
     recoter,
 )
+from .schedule import equivalent_cron, lanceur, supporte, taches
 from .refresh import DEFAULT_DRIFT_THRESHOLD, collection_roles, refresh_quotes
 from .report import write_and_open
 from .scan import prefetch, required_market_names, scan
@@ -1097,6 +1098,79 @@ def cmd_daily(args) -> int:
     return 10 if passage.actionnables else 0
 
 
+def cmd_schedule(args) -> int:
+    """Enregistre (ou retire) le passage quotidien aupres du systeme.
+
+    La planification appartient au projet : une tache portee par un terminal
+    ouvert meurt avec lui, et c'est entre deux consultations que les prix
+    bougent.
+    """
+    import subprocess
+
+    liste = taches()
+    script = lanceur()
+
+    if not supporte():
+        print("Planificateur non pilote sur ce systeme. Lignes crontab "
+              "equivalentes :")
+        print()
+        print(equivalent_cron())
+        return 1
+
+    if not script.exists():
+        print(f"Lanceur introuvable : {script}", file=sys.stderr)
+        return 1
+
+    if args.remove:
+        for t in liste:
+            r = subprocess.run(t.supprimer(), capture_output=True, text=True)
+            etat = "retiree" if r.returncode == 0 else "absente"
+            print(f"  {t.nom:<32} {etat}")
+        return 0
+
+    if not args.install:
+        # Etat par defaut : dire ce qui tourne, sans rien modifier.
+        actif = 0
+        for t in liste:
+            r = subprocess.run(t.etat(), capture_output=True, text=True)
+            sortie = (r.stdout or "").strip()
+            if r.returncode != 0:
+                print(f"  {t.nom:<32} absente")
+            elif sortie.startswith("BATTERIE"):
+                # Etat piegeux : la tache existe, le planificateur la met en
+                # file, et rien ne tourne jamais. Le dire explicitement.
+                print(f"  {t.nom:<32} BLOQUEE (ne demarre pas sur batterie) "
+                      f"-- relance schedule --install")
+            else:
+                actif += 1
+                prochaine = sortie[3:].strip() or t.heure
+                print(f"  {t.nom:<32} active, prochaine : {prochaine}")
+        if not actif:
+            print()
+            print("Aucun passage planifie. Pour les installer :")
+            print("  python -m tradeup.cli schedule --install")
+        return 0
+
+    echecs = 0
+    for t in liste:
+        r = subprocess.run(t.creer(), capture_output=True, text=True)
+        if r.returncode == 0:
+            print(f"  {t.nom:<32} installee, tous les jours a {t.heure}")
+        else:
+            echecs += 1
+            print(f"  {t.nom:<32} ECHEC : {(r.stderr or r.stdout).strip()}",
+                  file=sys.stderr)
+    if echecs:
+        print("Un echec vient le plus souvent d'un manque de droits : "
+              "relance le terminal en administrateur.", file=sys.stderr)
+        return 1
+    print()
+    print(f"Lanceur : {script}")
+    print("Le passage tourne desormais sans terminal ouvert. Journal dans "
+          "data/passages.jsonl, sortie brute dans data/passages.log.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="tradeup", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1376,6 +1450,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ttl", type=float, default=24,
                    help="duree de validite du cache, en heures (defaut 24)")
     s.add_argument("--db", default=None)
+
+    s = sub.add_parser("schedule",
+                       help="planifier le passage quotidien sur cette machine")
+    s.set_defaults(func=cmd_schedule)
+    s.add_argument("--install", action="store_true",
+                   help="enregistrer les deux passages quotidiens")
+    s.add_argument("--remove", action="store_true",
+                   help="retirer les taches planifiees")
 
     s = sub.add_parser("cache", help="etat du cache de prix")
     s.add_argument("--prune", type=float, nargs="?", const=30.0, default=None,
