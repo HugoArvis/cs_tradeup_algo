@@ -1030,7 +1030,8 @@ def cmd_daily(args) -> int:
                           min_outcome_volume=args.min_volume or None,
                           max_unpriced_probability=args.max_unpriced)
     avant, _ = scan(db, pricer, rarity, screen=screen, ranking=Ranking.ROI,
-                    float_model=args.float_model, limit=None)
+                    float_model=args.float_model,
+                    float_percentile=args.float_pct, limit=None)
 
     collections = {c.id: c for c in db.tradeable_collections(rarity)}
     noms = noms_prioritaires(avant, collections, rarity, cache,
@@ -1053,7 +1054,8 @@ def cmd_daily(args) -> int:
     args.offline = True
     pricer2, cache2 = _make_pricer(args)
     apres, stats = scan(db, pricer2, rarity, screen=screen, ranking=Ranking.ROI,
-                        float_model=args.float_model, limit=args.limit)
+                        float_model=args.float_model,
+                        float_percentile=args.float_pct, limit=args.limit)
 
     passage = Passage(rarity=args.rarity, recotes=recotes,
                       budget=args.budget, epuise=epuise)
@@ -1438,7 +1440,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-unpriced", type=float, default=0.02)
     s.add_argument("--min-input-volume", type=int, default=3)
     s.add_argument("--margin", type=float, default=0.05)
-    s.add_argument("--float-model", default="random", choices=("fixed", "random"))
+    s.add_argument("--float-model", default="fixed", choices=("fixed", "random"),
+                   help="defaut 'fixed' : la strategie visee TRIE les annonces "
+                        "Steam, ou le float n'est pas price. Passer a 'random' "
+                        "si les entrees viennent d'ordres d'achat, ou le float "
+                        "est subi -- l'ecart atteint 62 points sur Bank")
+    s.add_argument("--float-pct", type=float, default=0.15,
+                   help="position visee dans le palier d'usure, 0 = le plus bas "
+                        "(defaut 0.15). Plus il est bas, plus il faut inspecter "
+                        "d'annonces pour reunir les dix entrees")
     s.add_argument("--price-basis", default="sales", choices=("listing", "sales"),
                    help="defaut 'sales' ici : un passage quotidien sert a "
                         "decider, donc a raisonner sur ce que le marche negocie")

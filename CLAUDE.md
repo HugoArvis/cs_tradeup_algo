@@ -133,6 +133,19 @@ réelle (P250 Kintsugi 22,62 € au palier, 40,27 € sous 0,0105). D'où le cho
 modèle de float : `fixed` est légitime si l'on trie les annonces Steam,
 `random` si l'on achète sans regarder.
 
+**L'écart entre les deux modèles décide du verdict**, il ne le nuance pas.
+Mesuré le 20 septembre 2026 sur le même cache Industrial : Bank **96 % en
+`random` contre 158 % en `fixed`**, Italy 93 % contre 120 %, Train 17 % contre
+76 %. Deux contrats passent le point mort en changeant ce seul réglage. Choisir
+le modèle revient donc à choisir la méthode d'approvisionnement, et se tromper
+de modèle rend le classement entier inutilisable. `daily` est par défaut en
+`fixed`, la stratégie visée étant le tri d'annonces Steam.
+
+Ce que `fixed` ne facture pas : **la recherche**. Viser `--float-pct 0.15`
+suppose de trouver dix annonces dans le premier sixième du palier, donc d'en
+inspecter beaucoup plus — le float n'étant pas affiché dans la liste Steam. Ce
+coût est en temps, pas en argent, et n'apparaît dans aucun chiffre du modèle.
+
 **Float de sortie** : moyenne des floats **normalisés** — chaque entrée ramenée
 à `(float − min_skin) / (max_skin − min_skin)` — puis remappée sur le range du
 skin de **sortie**. Moyenner les floats affichés est faux : sur un contrat réel,
