@@ -56,6 +56,10 @@ class Ligne:
     profitability: float
     profit_probability: float
     age_max: float | None  # secondes, None si aucun prix connu
+    # Profitabilite recalculee sur des ANNONCES REELLES (`plan`), avec leurs
+    # floats et leurs prix. None = pas encore confirme.
+    confirmee: float | None = None
+    motif_echec: str = ""
 
     @property
     def frais(self) -> bool:
@@ -64,12 +68,31 @@ class Ligne:
 
     @property
     def actionnable(self) -> bool:
-        """Rentable ET sur des prix frais. Les deux, ou rien.
+        """Rentable SUR ANNONCES REELLES, et sur des prix frais.
 
-        Un contrat au-dessus du point mort sur des prix de trois jours n'est
-        pas une occasion, c'est une hypothese.
+        Trois conditions, et la premiere est la plus dure a satisfaire.
+
+        `scan` suppose qu'un bas float s'obtient au prix du palier. C'etait
+        vrai sur Steam tant que le float n'y etait pas visible ; les
+        extensions de lecture de float l'ont rendu faux. Mesure le 20
+        septembre 2026 sur la G3SG1 Green Apple (FN) : 0,19 au palier, 0,48
+        sous 0,026 de float, soit +153 %. Le meme jour, `scan` annoncait le
+        contrat Bank a 148 % et `plan`, sur 356 annonces reelles, le donnait
+        a -0,3 %.
+
+        Un chiffre de `scan` n'est donc PAS une occasion, c'est une piste. On
+        n'agit que sur un chiffre de `plan`.
         """
-        return self.profitability >= 1.0 and self.frais
+        return (self.confirmee is not None
+                and self.confirmee >= 1.0
+                and self.frais)
+
+    @property
+    def ecart_confirmation(self) -> float | None:
+        """De combien `scan` s'est-il trompe ? Negatif = il etait optimiste."""
+        if self.confirmee is None:
+            return None
+        return self.confirmee - self.profitability
 
 
 @dataclass
@@ -255,3 +278,87 @@ def historique(chemin: Path, collection: str, limite: int = 10) -> list[tuple[fl
             if c.get("collection") == collection:
                 serie.append((d["horodatage"], c["profitabilite"]))
     return serie[-limite:]
+
+
+#: Nombre de candidats confirmes par `plan` a chaque passage. Chacun coute
+#: quelques centaines de requetes CSFloat -- c'est cher, donc on ne confirme
+#: que la tete du classement. Au-dela, on ne deciderait rien de toute facon.
+DEFAULT_CONFIRM = 3
+
+
+def confirmer(
+    db,
+    lignes: list[Ligne],
+    collections: dict[str, Collection],
+    rarity: Rarity,
+    source,
+    *,
+    combien: int = DEFAULT_CONFIRM,
+    sell_source: PriceSource | None = None,
+    sell_to_usd: float = 1.0,
+    progress: Callable[[int, int], None] | None = None,
+) -> list[Ligne]:
+    """Recalcule les meilleurs candidats sur des ANNONCES REELLES.
+
+    C'est l'etape qui separe une piste d'une occasion, et elle n'est pas
+    facultative. `scan` raisonne sur un prix par palier d'usure en supposant
+    qu'un bas float s'y obtient au meme prix. Cette hypothese a ete vraie sur
+    Steam tant que le float n'y etait pas visible ; elle ne l'est plus.
+
+    Mesure du 20 septembre 2026, contrat Bank en Industrial :
+    `scan` 148 %, `plan` sur 356 annonces reelles **-0,3 %**. L'ecart n'est
+    pas une imprecision, c'est un renversement.
+
+    Les contrats melangeant deux collections ne sont pas confirmables ici --
+    `plan` est mono-collection. Ils restent affiches, jamais actionnables.
+    """
+    from .plan import build_plan
+
+    sortie: list[Ligne] = []
+    fait = 0
+    for rang, ligne in enumerate(lignes):
+        if fait >= combien or "+" in ligne.collection:
+            motif = ("melange : plan est mono-collection"
+                     if "+" in ligne.collection else "hors du top confirme")
+            sortie.append(Ligne(
+                ligne.collection, ligne.cost, ligne.ev_net, ligne.profitability,
+                ligne.profit_probability, ligne.age_max, None, motif))
+            continue
+
+        col = next((c for c in collections.values()
+                    if c.name in ligne.collection), None)
+        if col is None:
+            sortie.append(Ligne(
+                ligne.collection, ligne.cost, ligne.ev_net, ligne.profitability,
+                ligne.profit_probability, ligne.age_max, None,
+                "collection introuvable"))
+            continue
+
+        fait += 1
+        if progress:
+            progress(fait, combien)
+        try:
+            plan = build_plan(db, col, rarity, source, sell_source=sell_source,
+                              sell_to_usd=sell_to_usd)
+        except Exception as exc:  # noqa: BLE001 - un echec ne doit pas tout arreter
+            log.warning("Confirmation impossible pour %s : %s", col.name, exc)
+            sortie.append(Ligne(
+                ligne.collection, ligne.cost, ligne.ev_net, ligne.profitability,
+                ligne.profit_probability, ligne.age_max, None,
+                f"echec : {type(exc).__name__}"))
+            continue
+
+        if plan is None:
+            # Pas assez d'annonces reelles : ce n'est pas un contrat, c'est une
+            # ligne de tableau. Le distinguer d'un contrat perdant importe.
+            sortie.append(Ligne(
+                ligne.collection, ligne.cost, ligne.ev_net, ligne.profitability,
+                ligne.profit_probability, ligne.age_max, None,
+                "pas assez d'annonces"))
+            continue
+
+        sortie.append(Ligne(
+            ligne.collection, plan.result.cost, plan.result.ev_net,
+            ligne.profitability, plan.result.profit_probability,
+            ligne.age_max, plan.result.profitability, ""))
+    return sortie

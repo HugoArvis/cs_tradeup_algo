@@ -44,7 +44,9 @@ from .orders import (
 from .daily import (
     DECISION_MAX_AGE,
     DEFAULT_BUDGET,
+    DEFAULT_CONFIRM,
     DEFAULT_TOP,
+    confirmer,
     Ligne,
     Passage,
     age_max,
@@ -1071,25 +1073,53 @@ def cmd_daily(args) -> int:
             age_max=age_max(col, rarity, cache2) if col else None,
         ))
 
+    # --- 4. Confirmation sur annonces REELLES ---
+    # Sans cette etape, le classement n'est qu'une piste : `scan` suppose
+    # qu'un bas float s'obtient au prix du palier, ce qui est faux depuis que
+    # le float est lisible sur Steam. Mesure : Bank a 148 % selon `scan`,
+    # -0.3 % selon `plan` sur 356 annonces reelles.
+    if args.confirm > 0:
+        cle = csfloat_api_key(getattr(args, "api_key", None))
+        if not cle:
+            print("Cle CSFloat absente : aucune confirmation possible, les "
+                  "chiffres restent des pistes.", file=sys.stderr)
+        else:
+            csf = CSFloat(cle, calls_per_minute=getattr(args, "csfloat_rate", 8))
+            taux = 1.0
+            print(f"Confirmation des {args.confirm} meilleurs sur annonces "
+                  f"reelles (CSFloat)...", file=sys.stderr)
+            passage.lignes = confirmer(
+                db, passage.lignes, collections, rarity, csf,
+                combien=args.confirm, sell_source=source, sell_to_usd=taux,
+                progress=_progress("confirme"))
+
     journaliser(passage, journal)
 
     # --- 4. Restitution ---
     print()
     print(f"Passage du {datetime.now():%Y-%m-%d %H:%M} -- {args.rarity}")
-    print(f"{'collection':<38}{'cout':>7}{'EV':>7}{'profit.':>9}"
-          f"{'P(gain)':>9}{'age':>8}{'hier':>8}")
-    print("-" * 86)
+    print(f"{'collection':<34}{'piste':>8}{'REEL':>8}{'cout':>7}"
+          f"{'age':>7}{'':>4}{'note':<26}")
+    print("-" * 94)
     for x in passage.lignes:
         age = "jamais" if x.age_max is None else f"{x.age_max / 3600:.0f}h"
-        serie = historique(journal, x.collection, limite=2)
-        veille = f"{serie[0][1]:.0%}" if len(serie) > 1 else "-"
-        marque = "  <<" if x.actionnable else ("   ." if x.frais else "  !!")
-        print(f"{x.collection[:36]:<38}{x.cost:>7.2f}{x.ev_net:>7.2f}"
-              f"{x.profitability:>8.0%}{x.profit_probability:>9.0%}"
-              f"{age:>8}{veille:>8}{marque}")
-    print("-" * 86)
-    print(f"  <<  rentable ET prix de moins de {DECISION_MAX_AGE // 3600} h")
-    print("  !!  prix trop vieux pour decider")
+        reel = f"{x.confirmee:.0%}" if x.confirmee is not None else "-"
+        if x.actionnable:
+            marque, note = "  <<", "ACHETABLE"
+        elif x.confirmee is not None:
+            marque, note = "  xx", "confirme perdant"
+        else:
+            marque, note = "   ?", x.motif_echec or "non confirme"
+        if not x.frais:
+            note = f"prix vieux -- {note}"
+        print(f"{x.collection[:32]:<34}{x.profitability:>7.0%}{reel:>8}"
+              f"{x.cost:>7.2f}{age:>7}{marque:>4}  {note:<26}")
+    print("-" * 94)
+    print("  piste = estimation `scan`, sur un prix par palier d'usure.")
+    print("  REEL  = `plan`, sur les annonces reellement en vente et leur float.")
+    print("  Seul REEL engage : un bas float ne s'obtient plus au prix du palier.")
+    print(f"  <<  achetable : REEL au-dessus du point mort et prix de moins de "
+          f"{DECISION_MAX_AGE // 3600} h")
     print()
     print(passage.resume())
     print(f"Journal : {journal}")
@@ -1433,6 +1463,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--budget", type=int, default=DEFAULT_BUDGET,
                    help="cotations maximales par passage (defaut 200, cale sur "
                         "ce qu'une fenetre Steam ouverte laisse passer)")
+    s.add_argument("--confirm", type=int, default=DEFAULT_CONFIRM,
+                   help="nombre de candidats de tete recalcules sur des "
+                        "ANNONCES REELLES via CSFloat (defaut 3). 0 pour "
+                        "s'en passer -- mais alors rien n'est achetable")
+    s.add_argument("--csfloat-rate", type=int, default=8)
+    s.add_argument("--api-key", default=None)
     s.add_argument("--journal", default="data/passages.jsonl",
                    help="fichier ou s'empile un enregistrement par passage")
     s.add_argument("--limit", type=int, default=15)

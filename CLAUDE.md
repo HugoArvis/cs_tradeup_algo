@@ -125,7 +125,25 @@ et `collections` l'affiche : c'est un critère de sourcing gratuit qui dit où
 chercher. Contraste mesuré sur la base réelle — Aztec 0,875 contre Nuke 0,014,
 deux collections à sortie unique pourtant.
 
-**Sur Steam, le prix ne dépend pas du float** : il n'apparaît pas dans la liste,
+**Ce n'est plus vrai : Steam price le float lui aussi.** Mesuré le
+20 septembre 2026 sur la G3SG1 Green Apple (FN) : **0,19 € au palier, 0,48 €
+sous 0,026** de float, soit **+153 %**. Les extensions de lecture de float sont
+assez répandues pour que les vendeurs l'intègrent. L'inefficience sur laquelle
+reposait toute la stratégie de tri a disparu, et avec elle la légitimité de
+`--float-model fixed` : il suppose qu'un bas float est gratuit.
+
+Conséquence directe, mesurée le même jour sur The Bank Collection en
+Industrial : `scan` annonçait **148 %**, `plan` sur 356 annonces réelles
+donnait **−0,3 %**. Ce n'est pas une imprécision, c'est un renversement. D'où
+l'étape `daily --confirm` : un chiffre de `scan` est une **piste**, seul un
+chiffre de `plan` engage. `Ligne.actionnable` exige désormais **trois**
+conditions — confirmé par `plan`, au-dessus du point mort, prix de moins de
+24 h.
+
+Le paragraphe ci-dessous décrit l'état antérieur, conservé parce qu'il explique
+d'où vient le modèle `fixed` :
+
+**Sur Steam, le prix ne dépendait pas du float** : il n'apparaît pas dans la liste,
 il faut inspecter chaque annonce. Les vendeurs ne le pricent donc pas, et un bas
 float s'y obtient au prix du palier — c'est l'inefficience que la stratégie de
 tri exploite. Sur **CSFloat**, le float est visible et pricé : la prime y est

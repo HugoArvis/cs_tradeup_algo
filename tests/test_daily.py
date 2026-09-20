@@ -94,8 +94,17 @@ def test_un_contrat_frais_mais_perdant_nest_pas_actionnable():
     assert frais.frais and not frais.actionnable
 
 
-def test_les_deux_conditions_reunies():
-    bon = Ligne("A", 1.0, 1.1, 1.10, 0.9, age_max=DECISION_MAX_AGE - 1)
+def test_les_trois_conditions_reunies():
+    """Frais NE SUFFIT PLUS : il faut aussi la confirmation sur annonces.
+
+    Ce test exigeait deux conditions jusqu'au 20 septembre. La troisieme est
+    arrivee le jour ou `plan` a donne -0,3 % la ou `scan` annoncait 148 %.
+    """
+    sans = Ligne("A", 1.0, 1.1, 1.10, 0.9, age_max=DECISION_MAX_AGE - 1)
+    assert sans.frais and not sans.actionnable
+
+    bon = Ligne("A", 1.0, 1.1, 1.10, 0.9, age_max=DECISION_MAX_AGE - 1,
+                confirmee=1.10)
     assert bon.actionnable
 
 
@@ -287,3 +296,80 @@ def test_une_coupure_reseau_garde_ce_qui_a_ete_obtenu(cache):
 
     assert obtenus == 4 and epuise is True
     assert cache.get("Objet 3", "steam", ttl=10 ** 9) is not None
+
+
+# --- Confirmation sur annonces reelles ---------------------------------------
+# La lecon du 20 septembre : `scan` annoncait le contrat Bank a 148 %, `plan`
+# le donnait a -0.3 % sur 356 annonces reelles. L'ecart n'est pas une
+# imprecision, c'est un renversement -- et il vient d'une hypothese devenue
+# fausse : qu'un bas float s'obtienne au prix du palier.
+
+
+def test_une_piste_non_confirmee_nest_jamais_achetable():
+    piste = Ligne("A", 1.4, 2.2, 1.58, 1.0, age_max=600)
+    assert piste.profitability >= 1.0 and piste.frais
+    assert piste.confirmee is None
+    assert not piste.actionnable
+
+
+def test_une_piste_confirmee_perdante_nest_pas_achetable():
+    """Le cas Bank exactement : 158 % en piste, 99.7 % en reel."""
+    x = Ligne("Bank", 1.17, 1.17, 1.58, 1.0, age_max=600, confirmee=0.997)
+    assert not x.actionnable
+    assert x.ecart_confirmation < 0        # scan etait optimiste
+
+
+def test_une_piste_confirmee_rentable_et_fraiche_est_achetable():
+    x = Ligne("A", 1.0, 1.3, 1.20, 0.9, age_max=600, confirmee=1.30)
+    assert x.actionnable and x.ecart_confirmation > 0
+
+
+def test_une_confirmation_sur_prix_vieux_ne_suffit_pas():
+    x = Ligne("A", 1.0, 1.3, 1.20, 0.9, age_max=5 * 24 * 3600, confirmee=1.30)
+    assert not x.actionnable
+
+
+def test_un_melange_reste_une_piste(db, cache, monkeypatch):
+    """`plan` est mono-collection : un melange ne peut pas etre confirme.
+
+    L'afficher sans le dire laisserait croire qu'il a ete verifie.
+    """
+    from tradeup.daily import confirmer
+
+    lignes = [Ligne("7x Collection A + 3x Collection B", 1.0, 1.2, 1.2, 0.9, 600)]
+    sortie = confirmer(db, lignes,
+                       {c.id: c for c in db.tradeable_collections(Rarity.INDUSTRIAL)},
+                       Rarity.INDUSTRIAL, None, combien=3)
+    assert sortie[0].confirmee is None
+    assert "mono-collection" in sortie[0].motif_echec
+    assert not sortie[0].actionnable
+
+
+def test_un_echec_de_confirmation_ne_fait_pas_tomber_le_passage(db, monkeypatch):
+    """Une collection qui casse ne doit pas emporter les autres."""
+    from tradeup import daily as mod
+
+    def boum(*a, **k):
+        raise RuntimeError("quota")
+
+    monkeypatch.setattr("tradeup.plan.build_plan", boum)
+    lignes = [Ligne("Collection A", 1.0, 1.2, 1.2, 0.9, 600)]
+    sortie = mod.confirmer(
+        db, lignes,
+        {c.id: c for c in db.tradeable_collections(Rarity.INDUSTRIAL)},
+        Rarity.INDUSTRIAL, None, combien=1)
+    assert sortie[0].confirmee is None and not sortie[0].actionnable
+    assert "RuntimeError" in sortie[0].motif_echec
+
+
+def test_pas_assez_dannonces_se_distingue_dun_contrat_perdant(db, monkeypatch):
+    """Sans la distinction, "aucune occasion" masque "aucune donnee"."""
+    from tradeup import daily as mod
+
+    monkeypatch.setattr("tradeup.plan.build_plan", lambda *a, **k: None)
+    lignes = [Ligne("Collection A", 1.0, 1.2, 1.2, 0.9, 600)]
+    sortie = mod.confirmer(
+        db, lignes,
+        {c.id: c for c in db.tradeable_collections(Rarity.INDUSTRIAL)},
+        Rarity.INDUSTRIAL, None, combien=1)
+    assert sortie[0].motif_echec == "pas assez d'annonces"
