@@ -34,7 +34,8 @@ def test_deux_passages_a_des_heures_eloignees():
 def test_chaque_tache_porte_le_prefixe_du_projet():
     """Sans prefixe commun, on ne peut ni les retrouver ni les retirer."""
     assert all(t.nom.startswith(PREFIXE) for t in taches())
-    assert len({t.nom for t in taches()}) == 2
+    # Deux passages courts + le balayage de nuit, tous distincts.
+    assert len({t.nom for t in taches()}) == len(taches())
 
 
 def test_la_tache_doit_pouvoir_demarrer_sur_batterie():
@@ -98,3 +99,28 @@ def test_l_equivalent_cron_est_propose_pour_les_autres_systemes(tmp_path):
         h, m = heure.split(":")
         assert ligne.startswith(f"{int(m)} {int(h)} * * *")
         assert PREFIXE in ligne
+
+
+def test_le_balayage_long_est_une_tache_a_part():
+    """Un travail d'une heure et demie ne doit pas partager le creneau d'un
+    passage court : l'un bloquerait l'autre.
+
+    Il tourne de nuit, une seule fois -- c'est la raison d'etre de la
+    separation, pas un detail d'organisation.
+    """
+    from tradeup.schedule import BALAYAGE
+
+    noms = [t.nom for t in taches()]
+    assert f"{PREFIXE}-balayage" in noms
+    assert len(taches()) == len(PASSAGES) + 1
+
+    bal = next(t for t in taches() if t.nom.endswith("balayage"))
+    heure = int(bal.heure.split(":")[0])
+    assert 0 <= heure <= 5, "le balayage doit tourner la nuit"
+    assert bal.lanceur.name == BALAYAGE[2]
+    assert bal.lanceur != lanceur(), "lanceur distinct du passage court"
+
+
+def test_le_lanceur_du_balayage_existe():
+    bal = next(t for t in taches() if t.nom.endswith("balayage"))
+    assert bal.lanceur.exists(), f"lanceur manquant : {bal.lanceur}"

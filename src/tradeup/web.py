@@ -765,6 +765,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "calcul inconnu"}, 404)
                 return
             self._json(self.app.inventory_job_payload(job))
+        elif route.path == "/api/latest":
+            # Ce que la nuit a trouve. Aucune requete, aucune attente : un
+            # balayage complet dure plus d'une heure, il n'a pas a etre refait
+            # parce qu'on ouvre la page.
+            rarity = (params.get("rarity") or ["industrial"])[0]
+            if rarity not in RARITES:
+                self._json({"error": "rarete inconnue"}, 400)
+                return
+            self._json({
+                "plans": self.app.journal.latest_profitable(rarity),
+                "currency": self.app.currency,
+            })
         elif route.path == "/api/history":
             plans = self.app.journal.plans(limit=40)
             for ligne in plans:
@@ -1030,7 +1042,7 @@ vertical-align:-2px;margin-right:7px}
           <option value="classified">Classified</option>
         </select>
       </label>
-      <button id="chercher">Chercher les tradeups rentables</button>
+      <button id="chercher">Relancer maintenant (plus d’1 h)</button>
     </div>
     <p class="muted" id="cout-balayage">…</p>
   </div>
@@ -1222,6 +1234,48 @@ function carte(p, planId, archive) {
       <button class="sm" data-follow="${planId}">Suivre ce contrat</button>
     </div>
   </div>`;
+}
+
+// --- Ce que la nuit a trouve ------------------------------------------------
+// Un balayage complet dure plus d'une heure. Le refaire parce qu'on ouvre la
+// page ferait attendre devant un travail deja fait : on lit donc d'abord le
+// journal, et le bouton ne sert qu'a rafraichir volontairement.
+
+function ageTexte(ts) {
+  const h = (Date.now() / 1000 - ts) / 3600;
+  if (h < 1) return Math.round(h * 60) + ' min';
+  if (h < 48) return Math.round(h) + ' h';
+  return Math.round(h / 24) + ' j';
+}
+
+async function dernierBalayage() {
+  const r = $('#rarity').value;
+  const d = await fetch('/api/latest?rarity=' + r).then(x => x.json());
+  if (d.error) return;
+  const plans = d.plans || [];
+
+  if (!plans.length) {
+    $('#avancement').innerHTML = `<div class="card">
+      <b>Rien de rentable au dernier balayage.</b>
+      <p class="muted">Le balayage de nuit n’a retenu aucun contrat au-dessus
+      du point mort dans cette rareté, ou n’a pas encore tourné. Lancer une
+      recherche maintenant prend plus d’une heure — mieux vaut la laisser se
+      faire cette nuit.</p></div>`;
+    return;
+  }
+
+  // Le detail d'achat vient du journal, pas d'un nouveau calcul.
+  const plansComplets = await Promise.all(plans.map(p => chargerPlan(p.plan_id)));
+  const age = Math.min(...plans.map(p => Date.now() / 1000 - p.created_at));
+
+  $('#avancement').innerHTML = `<div class="card">
+    <b>${plans.length} contrat(s) rentable(s) au dernier balayage</b>
+    <p class="muted">Calculé il y a ${ageTexte(Date.now() / 1000 - age)} ·
+    montants en ${d.currency} · sur annonces réelles.
+    ${age > 24 * 3600 ? '<b>Prix de plus de 24 h : recotez avant d’acheter.</b>'
+      : 'Prix récents.'}</p></div>`;
+  $('#resultats').innerHTML = plans
+    .map((p, i) => carte(plansComplets[i], p.plan_id, age > 24 * 3600)).join('');
 }
 
 // --- La recherche -----------------------------------------------------------
@@ -1653,8 +1707,12 @@ $('#inv-calculer').addEventListener('click', async () => {
 
 $('#tous').addEventListener('change', contrats);
 $('#rafraichir').addEventListener('click', contrats);
-$('#rarity').addEventListener('change', charger);
+$('#rarity').addEventListener('change', () => {
+  charger();
+  dernierBalayage();
+});
 charger();
+dernierBalayage();
 </script></body></html>
 """
 

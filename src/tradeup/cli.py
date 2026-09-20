@@ -1204,6 +1204,121 @@ def cmd_schedule(args) -> int:
     return 0
 
 
+def cmd_sweep(args) -> int:
+    """Balaye TOUTE une rarete avec `plan` et enregistre chaque resultat.
+
+    C'est le travail long -- plus d'une heure pour 46 collections -- et c'est
+    precisement pour cela qu'il ne doit pas se faire pendant qu'on regarde
+    l'ecran. Lance la nuit par le planificateur, il remplit le journal ; au
+    matin l'interface lit ce journal et affiche les contrats rentables
+    immediatement, sans rien recalculer.
+
+    Un quota epuise n'interrompt pas le balayage : la collection est remise en
+    file et retentee apres une pause. Perdre une collection parce que l'API a
+    dit non laisserait un trou silencieux dans le classement.
+    """
+    import time as _t
+
+    db = SkinDatabase.load(args.db)
+    rarity = RARITY_ALIASES[args.rarity]
+    cle = csfloat_api_key(args.api_key)
+    if not cle:
+        print("Cle CSFloat absente (voir .env).", file=sys.stderr)
+        return 1
+
+    journal = Journal()
+    source = CSFloat(cle, calls_per_minute=args.rate)
+    steam = SteamMarket(currency=args.currency, cache=QuoteCache(ttl_seconds=6 * 3600),
+                        calls_per_minute=15, ttl_seconds=6 * 3600)
+
+    cols = list(db.tradeable_collections(rarity))
+    if args.collections:
+        voulus = {c.lower() for c in args.collections}
+        cols = [c for c in cols if c.name.lower() in voulus]
+
+    print(f"{len(cols)} collections a calculer en {rarity.label}.", file=sys.stderr)
+    file = list(cols)
+    faits, echecs, rentables = 0, 0, 0
+    debut = _t.time()
+
+    while file:
+        col = file[0]
+        try:
+            plan = build_plan(db, col, rarity, source, sell_source=steam,
+                              sell_fees=FEE_MODELS["steam"])
+        except RateLimited:
+            # On NE retire PAS la collection de la file : le quota reviendra.
+            print(f"  quota epuise, pause de {args.pause // 60} min "
+                  f"({faits}/{len(cols)} faits)", file=sys.stderr)
+            _t.sleep(args.pause)
+            continue
+        except Exception as exc:  # noqa: BLE001
+            file.pop(0)
+            echecs += 1
+            print(f"  [KO] {col.name} : {type(exc).__name__}", file=sys.stderr)
+            continue
+
+        file.pop(0)
+        faits += 1
+        if plan is None:
+            echecs += 1
+            print(f"  [--] {col.name} : pas assez d'annonces", file=sys.stderr)
+            continue
+
+        payload = _plan_payload(plan, args.currency)
+        journal.save_plan(payload, collection_id=col.id, rarity=args.rarity)
+        prof = payload["profitability"]
+        if prof >= 1.0:
+            rentables += 1
+        marque = "<<" if prof >= 1.0 else "  "
+        print(f"  [{prof:>5.0%}] {col.name:<40} {marque} "
+              f"({faits}/{len(cols)})", file=sys.stderr)
+
+    duree = (_t.time() - debut) / 60
+    print()
+    print(f"Balayage termine en {duree:.0f} min : {faits} calculees, "
+          f"{rentables} rentables, {echecs} sans resultat.")
+    print("L'interface les affiche sans recalculer : python -m tradeup.web")
+    journal.close()
+    return 10 if rentables else 0
+
+
+def _plan_payload(plan, devise: str) -> dict:
+    """Serialise un plan pour le journal, format identique a celui du web."""
+    r = plan.result
+    return {
+        "collection": plan.collection.name,
+        "rarity": plan.rarity.label,
+        "rarity_target": plan.rarity.next_up.label,
+        "currency": devise,
+        "cost": round(r.cost, 4), "net": round(r.ev_net, 4),
+        "profit": round(r.ev_profit, 4), "roi": round(r.roi, 4),
+        "profitability": round(r.profitability, 4),
+        "win_probability": round(r.profit_probability, 4),
+        "outcomes_count": r.distinct_outcomes,
+        "stdev": round(r.stdev, 4),
+        "avg_float": round(r.avg_input_float, 5),
+        "listings_examined": plan.listings_examined,
+        "float_slack": round(plan.float_slack, 5),
+        "worst_profit": (round(plan.worst_profit, 4)
+                         if plan.worst_profit is not None else None),
+        "best_profit": (round(plan.best_profit, 4)
+                        if plan.best_profit is not None else None),
+        "all_profitable": plan.all_outcomes_profitable,
+        "downgrade_profit": (round(plan.downgrade_profit, 4)
+                             if plan.downgrade_profit is not None else None),
+        "exit_loss": None, "exit_loss_ratio": None,
+        "price_drop_tolerance": None,
+        "inputs": [{"name": o.name, "float": round(o.float_value, 4),
+                    "price": round(o.unit_cost, 4), "url": o.url}
+                   for o in sorted(plan.options,
+                                   key=lambda o: (o.skin.name, o.float_value))],
+        "outcomes": [{"name": o.name, "probability": round(o.probability, 4),
+                      "float": round(o.float_value, 4),
+                      "net": round(o.net_value, 4)} for o in r.outcomes],
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="tradeup", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1496,6 +1611,20 @@ def build_parser() -> argparse.ArgumentParser:
                         "ferme pour des heures)")
     s.add_argument("--ttl", type=float, default=24,
                    help="duree de validite du cache, en heures (defaut 24)")
+    s.add_argument("--db", default=None)
+
+    s = sub.add_parser("sweep",
+                       help="balayer toute une rarete avec `plan` et journaliser "
+                            "(long : a lancer la nuit)")
+    s.set_defaults(func=cmd_sweep)
+    s.add_argument("--rarity", default="industrial", choices=sorted(RARITY_ALIASES))
+    s.add_argument("--collections", nargs="*", default=None)
+    s.add_argument("--rate", type=int, default=8,
+                   help="requetes CSFloat par minute (defaut 8)")
+    s.add_argument("--pause", type=int, default=600,
+                   help="pause en secondes quand le quota est epuise (defaut 600)")
+    s.add_argument("--currency", default="EUR", choices=sorted(CURRENCIES))
+    s.add_argument("--api-key", default=None)
     s.add_argument("--db", default=None)
 
     s = sub.add_parser("schedule",

@@ -34,6 +34,11 @@ from pathlib import Path
 #: ne l'impose ici, mais un creneau partage avec tout le monde n'aide pas.
 PASSAGES = (("matin", "07:47"), ("soir", "19:23"))
 
+#: Le balayage complet, lui, dure plus d'une heure : il tourne la nuit, une
+#: seule fois, sur un lanceur different. Le separer des passages courts evite
+#: qu'un travail long bloque un travail frequent -- et inversement.
+BALAYAGE = ("balayage", "03:11", "balayage_nuit.cmd")
+
 #: Prefixe des taches creees, pour pouvoir les retrouver et les retirer.
 PREFIXE = "tradeup-quotidien"
 
@@ -106,9 +111,14 @@ def lanceur(racine: Path | None = None) -> Path:
 
 
 def taches(racine: Path | None = None) -> list[Tache]:
+    base = racine or Path(__file__).resolve().parents[2]
     chemin = lanceur(racine)
-    return [Tache(f"{PREFIXE}-{libelle}", heure, chemin)
-            for libelle, heure in PASSAGES]
+    libelle_b, heure_b, script_b = BALAYAGE
+    return [
+        *(Tache(f"{PREFIXE}-{libelle}", heure, chemin)
+          for libelle, heure in PASSAGES),
+        Tache(f"{PREFIXE}-{libelle_b}", heure_b, base / "scripts" / script_b),
+    ]
 
 
 def supporte() -> bool:

@@ -222,6 +222,52 @@ class Journal:
             for r in rows
         ]
 
+    def latest_profitable(
+        self, rarity: str, *, seuil: float = 1.0, max_age: float = 36 * 3600
+    ) -> list[dict]:
+        """Derniers plans RENTABLES d'une rarete, un par collection.
+
+        Sert l'ouverture de la page : un balayage complet dure plus d'une
+        heure et se fait donc la nuit. Sans cette lecture, l'interface
+        n'afficherait rien avant d'avoir tout recalcule -- et l'utilisateur
+        attendrait devant un ecran vide un travail deja fait.
+
+        On ne garde que la cotation la PLUS RECENTE par collection : les
+        anciennes sont des etats du marche revolus, pas des candidats
+        concurrents.
+        """
+        rows = self._conn.execute(
+            """SELECT * FROM plans WHERE rarity = ? AND created_at >= ?
+               ORDER BY created_at DESC""",
+            (rarity, time.time() - max_age),
+        ).fetchall()
+
+        vus: set[str] = set()
+        sortie: list[dict] = []
+        for r in rows:
+            if r["collection_id"] in vus:
+                continue
+            vus.add(r["collection_id"])
+            payload = json.loads(r["payload"])
+            # `profitability` manque aux plans enregistres avant son
+            # introduction : on la recalcule plutot que d'ecarter la ligne.
+            prof = payload.get("profitability")
+            if prof is None:
+                prof = (r["net"] / r["cost"]) if r["cost"] else 0.0
+            if prof < seuil:
+                continue
+            sortie.append({
+                "plan_id": r["id"], "created_at": r["created_at"],
+                "collection": r["collection_name"],
+                "collection_id": r["collection_id"],
+                "profitability": round(prof, 4),
+                "cost": r["cost"], "net": r["net"], "profit": r["profit"],
+                "win_probability": payload.get("win_probability", 0.0),
+                "all_profitable": payload.get("all_profitable", False),
+            })
+        sortie.sort(key=lambda d: -d["profitability"])
+        return sortie
+
     def plan_payload(self, plan_id: str) -> dict | None:
         row = self._conn.execute(
             "SELECT payload FROM plans WHERE id = ?", (plan_id,)
