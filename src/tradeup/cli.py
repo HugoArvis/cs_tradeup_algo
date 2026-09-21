@@ -28,6 +28,7 @@ from .plan import build_plan
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
 from .gold import GOLD_INPUT_COUNT, scan_crates
+from .journal import Journal
 from .inventory import (
     best_tradeups as best_inventory_tradeups,
     closest_gaps as inventory_gaps,

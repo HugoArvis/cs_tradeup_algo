@@ -306,3 +306,25 @@ def test_le_ttl_demande_atteint_la_source_pas_seulement_le_cache():
     # Le cache porte la meme duree : les deux doivent s'accorder, sinon l'un
     # purge ce que l'autre croit encore valable.
     assert cache.ttl == 168 * 3600
+
+
+def test_aucun_nom_non_defini_dans_le_paquet():
+    """Un import manquant ne se voit qu'a l'execution de SA commande.
+
+    `cmd_sweep` referencait `Journal` sans l'importer. Le module se chargeait,
+    le parseur acceptait la commande, tous les tests passaient -- et le
+    balayage planifie de 3h11 aurait plante a sa premiere ligne. Une nuit
+    perdue, sans personne pour le voir.
+
+    pyflakes lit le paquet entier sans l'executer : c'est le seul moyen
+    d'attraper ca avant que le planificateur ne le fasse.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    paquet = Path(__file__).resolve().parents[1] / "src" / "tradeup"
+    r = subprocess.run([sys.executable, "-m", "pyflakes", str(paquet)],
+                       capture_output=True, text=True)
+    graves = [l for l in r.stdout.splitlines() if "undefined name" in l]
+    assert not graves, "noms non definis : " + " | ".join(graves)

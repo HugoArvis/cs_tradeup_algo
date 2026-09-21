@@ -10,7 +10,9 @@ requires-python = ">=3.11"
 dependencies = []  # noyau sans dependance : stdlib uniquement
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# pyflakes lit le paquet sans l'executer : il attrape les imports
+# manquants dans une commande que les tests n'appellent pas.
+dev = ["pytest>=8", "pyflakes>=3"]
 
 [project.scripts]
 tradeup = "tradeup.cli:main"
