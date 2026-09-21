@@ -8,6 +8,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 
+#: En dessous de ce nombre de ventes sur 24 h, `median_price` ne decrit plus
+#: le marche mais une transaction particuliere. Mesure : un median a 165 EUR
+#: sur UNE vente, la ou la plus basse annonce etait a 35,65.
+MIN_SALES_FOR_MEDIAN = 3
+
+
 @dataclass(frozen=True, slots=True)
 class Quote:
     """Un releve de prix pour un `market_hash_name` donne."""
@@ -38,17 +44,31 @@ class Quote:
         `median_price` est la mediane des ventes recentes : des transactions
         conclues, pas des esperances de vendeur. L'ecart avec la plus basse
         annonce porte l'essentiel de la marge en bas de gamme -- mesure sur le
-        G3SG1 Green Apple (MW), 0,09 vendu contre 0,11 demande, soit 18 % du
-        cout d'entree et 18 points de profitabilite sur le contrat Bank.
+        G3SG1 Green Apple (MW), 0,09 vendu contre 0,11 demande.
 
-        A l'ACHAT, viser ce prix suppose un ORDRE d'achat : on ne clique pas
-        sur une annonce a 0,09 quand la moins chere est a 0,11, on se met dans
-        la file et on attend. C'est ce que la methode echange contre son gain.
+        Deux garde-fous, chacun paye par un bug :
 
-        Repli sur l'annonce si aucune vente n'est publiee : un objet sans
-        historique n'est pas un objet gratuit.
+        1. **Jamais au-dessus de la plus basse annonce.** On ne vend pas a 165
+           ce dont un exemplaire est affiche a 35 : personne n'achete le
+           second quand le premier est la. Et a l'achat, placer un ordre
+           au-dessus du prix demande n'a pas de sens non plus.
+
+        2. **Un median sur trop peu de ventes n'est pas un median.** Mesure du
+           20 septembre 2026 sur le M4A4 | Radiation Hazard (FT) : Steam
+           annoncait `median=165.04` pour `volume=1`. Une transaction isolee
+           -- exemplaire sticke, motif rare, erreur de prix -- devenait la
+           valorisation. Le contrat Nuke ressortait a 191 % de profitabilite
+           quand TradeUpSpy le donnait a 42 %.
+
+        Repli sur l'annonce dans les deux cas : un objet sans historique
+        exploitable n'est pas un objet gratuit.
         """
-        return self.median_price if self.median_price is not None else self.lowest_price
+        bas, med = self.lowest_price, self.median_price
+        if med is None:
+            return bas
+        if self.volume is not None and self.volume < MIN_SALES_FOR_MEDIAN:
+            return bas if bas is not None else med
+        return min(med, bas) if bas is not None else med
 
     def sell_reference(self, conservative: bool = True) -> float | None:
         """Prix retenu pour VENDRE.

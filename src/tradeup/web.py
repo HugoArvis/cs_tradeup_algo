@@ -44,6 +44,7 @@ from .models import Rarity
 from .fees import STEAM
 from .plan import CSFloatPricer, Plan, build_plan
 from .pricing.cache import QuoteCache
+from .pricing.repository import MarketPricer
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
 from .pricing.steam import SteamMarket
@@ -209,6 +210,72 @@ class App:
                     self.currency = devise
         except Exception:  # noqa: BLE001 - la conversion est un confort
             log.warning("Devise du compte indisponible, affichage en USD")
+
+    def ordres(self, rarity_name: str, *, target_roi: float = 0.20) -> dict:
+        """Les ORDRES D'ACHAT a placer, plutot que des annonces a cliquer.
+
+        Un panier d'annonces ne se repete pas : chaque annonce est unique, et
+        le lendemain il faut tout rechercher. Un ordre d'achat, lui, se pose
+        une fois et se remplit tout seul -- c'est la seule forme exploitable
+        quand on veut refaire le meme contrat.
+
+        Lu sur le CACHE : aucune requete, donc reponse immediate. Les prix
+        viennent du balayage de nuit, et leur age est renvoye pour que
+        l'interface puisse le dire.
+        """
+        from .orders import scan_orders
+
+        # Sans ca, `self.currency` vaut son defaut "USD" tant que le compte
+        # n'a pas repondu -- et le cache, indexe par devise, ne rend alors
+        # AUCUNE cotation. Zero ordre, sans la moindre erreur.
+        self.load_currency()
+        rarity = RARITES[rarity_name]
+        cache = QuoteCache(ttl_seconds=720 * 3600)
+        steam = SteamMarket(currency=self.currency, cache=cache, offline=True,
+                            ttl_seconds=720 * 3600)
+        pricer = MarketPricer(steam, steam, buy_fees="steam", sell_fees="steam",
+                              safety_margin=0.05, min_input_volume=3,
+                              price_basis="sales")
+        try:
+            plans = scan_orders(self.db, rarity, pricer, target_roi=target_roi)
+        finally:
+            ages = pricer.quote_age()
+            cache.close()
+
+        return {
+            # Le marche est celui ou l'ordre se PLACE. Steam est le seul des
+            # deux a accepter un ordre sur une usure sans choisir le float --
+            # et c'est precisement ce que la strategie repetable demande.
+            "market": "Steam Community Market",
+            "currency": self.currency,
+            "target_roi": target_roi,
+            "age_hours": round(ages[0] / 3600, 1) if ages else None,
+            "plans": [
+                {
+                    "collection": p.collection.name,
+                    "rarity": p.rarity.label,
+                    "rarity_target": p.rarity.next_up.label,
+                    "ev_net": round(p.ev_net, 2),
+                    "market_cost": round(p.market_cost, 2),
+                    "budget": round(p.budget, 2),
+                    "discount": round(p.discount, 4),
+                    "feasible": p.feasible(),
+                    "win_probability": round(p.result.profit_probability, 4),
+                    "outcomes": p.result.distinct_outcomes,
+                    "lines": [
+                        {
+                            "name": l.name, "quantity": l.quantity,
+                            "market_price": round(l.market_price, 2),
+                            "order_price": round(l.order_price, 2),
+                            "discount": round(l.discount, 4),
+                            "below_floor": l.below_floor,
+                        }
+                        for l in p.lines
+                    ],
+                }
+                for p in plans
+            ],
+        }
 
     def revente(self) -> SteamMarket:
         """Marche de revente des sorties, partage par tous les calculs.
@@ -765,6 +832,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "calcul inconnu"}, 404)
                 return
             self._json(self.app.inventory_job_payload(job))
+        elif route.path == "/api/orders":
+            rarity = (params.get("rarity") or ["industrial"])[0]
+            if rarity not in RARITES:
+                self._json({"error": "rarete inconnue"}, 400)
+                return
+            try:
+                self._json(self.app.ordres(rarity))
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 500)
         elif route.path == "/api/latest":
             # Ce que la nuit a trouve. Aucune requete, aucune attente : un
             # balayage complet dure plus d'une heure, il n'a pas a etre refait
@@ -1021,6 +1097,7 @@ vertical-align:-2px;margin-right:7px}
 
 <div class="tabs">
   <div class="tab on" data-pane="calcul">Calculer</div>
+  <div class="tab" data-pane="ordres">Ordres d’achat</div>
   <div class="tab" data-pane="inventaire">Mon inventaire</div>
   <div class="tab" data-pane="histo">Historique des plans</div>
   <div class="tab" data-pane="contrats">Mes contrats</div>
@@ -1048,6 +1125,31 @@ vertical-align:-2px;margin-right:7px}
   </div>
   <div id="avancement"></div>
   <div id="resultats"></div>
+</div>
+
+<div class="pane" id="pane-ordres">
+  <div class="card">
+    <p class="muted">Un panier d’annonces ne se répète pas : chaque annonce est
+    unique, et le lendemain il faut tout rechercher. Un <b>ordre d’achat</b> se
+    pose une fois et se remplit tout seul — c’est la forme exploitable quand on
+    veut <b>refaire</b> le même contrat. Le calcul est renversé : au lieu de
+    partir du prix du marché, il déduit le <b>prix maximal</b> que chaque entrée
+    peut coûter pour que le contrat tienne.</p>
+    <div class="row">
+      <label>Rareté d’entrée
+        <select id="ord-rarity">
+          <option value="consumer">Consumer</option>
+          <option value="industrial" selected>Industrial</option>
+          <option value="mil-spec">Mil-Spec</option>
+          <option value="restricted">Restricted</option>
+          <option value="classified">Classified</option>
+        </select>
+      </label>
+      <button class="ghost" id="ord-relire">Relire</button>
+      <span class="muted">lecture du cache : instantané, aucune requête</span>
+    </div>
+  </div>
+  <div id="ord-sortie"></div>
 </div>
 
 <div class="pane" id="pane-inventaire">
@@ -1278,6 +1380,80 @@ async function dernierBalayage() {
     .map((p, i) => carte(plansComplets[i], p.plan_id, age > 24 * 3600)).join('');
 }
 
+// --- Les ordres d'achat -----------------------------------------------------
+// Un panier d'annonces ne se repete pas : chaque annonce est unique, et le
+// lendemain il faut tout rechercher. Un ordre se pose une fois et se remplit
+// tout seul -- c'est la seule forme exploitable quand on veut REFAIRE le
+// meme contrat.
+
+async function ordres() {
+  const r = $('#ord-rarity').value;
+  $('#ord-sortie').innerHTML = '<div class="card"><span class="spin"></span>lecture…</div>';
+  const d = await fetch('/api/orders?rarity=' + r).then(x => x.json());
+  if (d.error) {
+    $('#ord-sortie').innerHTML = '<div class="card"><div class="warn">' +
+      d.error + '</div></div>';
+    return;
+  }
+  const plans = d.plans || [];
+  const vieux = d.age_hours !== null && d.age_hours > 24;
+
+  if (!plans.length) {
+    $('#ord-sortie').innerHTML = `<div class="card">
+      <b>Aucun ordre ne peut rendre un contrat rentable dans cette rareté.</b>
+      <p class="muted">Soit le rabais nécessaire dépasse ce qu’un ordre peut
+      espérer obtenir, soit il tomberait sous le plancher de 0,03 € de Steam.
+      Les prix viennent du dernier balayage.</p></div>`;
+    return;
+  }
+
+  $('#ord-sortie').innerHTML = `
+    <div class="card">
+      <b>${plans.length} contrat(s) atteignables par ordre d’achat</b>
+      <p class="muted">Ordres à placer sur <b>${d.market}</b> ·
+      montants en ${d.currency} · rendement visé
+      +${Math.round(d.target_roi * 100)} %
+      ${d.age_hours === null ? '' : `· prix vieux de ${d.age_hours} h`}
+      ${vieux ? '<br><b>Plus de 24 h : recotez avant de placer.</b>' : ''}</p>
+    </div>` + plans.map(p => `
+    <div class="card">
+      <div class="tete">
+        <div>
+          <h2>${p.collection} <span class="tag">${p.rarity}</span></h2>
+          <div class="muted">10 entrées → 1 sortie ${p.rarity_target}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="gros prof">−${Math.round(p.discount * 100)} %</div>
+          <div class="muted">rabais à obtenir</div>
+        </div>
+      </div>
+      <div class="chiffres">
+        <span>au prix demandé <b>${p.market_cost.toFixed(2)}</b></span>
+        <span>budget maximal <b>${p.budget.toFixed(2)}</b></span>
+        <span>revente nette attendue <b>${p.ev_net.toFixed(2)}</b></span>
+        <span>chances de gagner <b>${Math.round(p.win_probability * 100)} %</b></span>
+      </div>
+      <div class="etape">Ordres à placer sur ${d.market}</div>
+      <div class="scroll"><table>
+        <thead><tr><th>Objet</th><th class="num">Qté</th>
+          <th class="num">Prix marché</th><th class="num">Prix d’ordre</th>
+          <th class="num">Rabais</th></tr></thead>
+        <tbody>${p.lines.map(l => `<tr>
+          <td>${l.name}${l.below_floor
+            ? ' <span class="tag">sous le plancher Steam</span>' : ''}</td>
+          <td class="num">${l.quantity}</td>
+          <td class="num">${l.market_price.toFixed(2)}</td>
+          <td class="num prof">${l.order_price.toFixed(2)}</td>
+          <td class="num">${Math.round(l.discount * 100)} %</td></tr>`).join('')}
+        </tbody>
+      </table></div>
+      <div class="warn"><b>Le float sera tiré au hasard dans le palier.</b>
+      Un ordre d’achat porte sur une usure, pas sur un float : c’est le prix
+      qui est choisi, pas la qualité. Les chances de gagner ci-dessus en
+      tiennent compte.</div>
+    </div>`).join('');
+}
+
 // --- La recherche -----------------------------------------------------------
 
 let sondageBatch = null, dernierBatch = null;
@@ -1383,6 +1559,7 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
   document.querySelectorAll('.pane').forEach(p =>
     p.classList.toggle('on', p.id === 'pane-' + t.dataset.pane));
+  if (t.dataset.pane === 'ordres') ordres();
   if (t.dataset.pane === 'histo') histo();
   if (t.dataset.pane === 'contrats') contrats();
   if (t.dataset.pane === 'inventaire') invApercu(false);
@@ -1707,6 +1884,8 @@ $('#inv-calculer').addEventListener('click', async () => {
 
 $('#tous').addEventListener('change', contrats);
 $('#rafraichir').addEventListener('click', contrats);
+$('#ord-rarity').addEventListener('change', ordres);
+$('#ord-relire').addEventListener('click', ordres);
 $('#rarity').addEventListener('change', () => {
   charger();
   dernierBalayage();

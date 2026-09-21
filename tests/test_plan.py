@@ -321,12 +321,17 @@ def test_la_base_ventes_retient_le_prix_negocie_pas_le_prix_demande():
         steam_net_proceeds(0.24))
 
 
-def test_un_prix_negocie_superieur_a_l_annonce_distingue_les_deux_bases():
+def test_un_prix_negocie_superieur_a_l_annonce_est_plafonne():
     """Le Galil Tuxedo se vendait 0,91 alors qu'il s'affichait 0,88.
 
-    La base prudente retient 0,88, la base "ventes" retient 0,91 : ignorer
-    l'ecart sous-estime la revente au lieu de la surestimer, mais c'est une
-    erreur quand meme.
+    Ce test affirmait le contraire jusqu'au 20 septembre : que la base
+    "ventes" devait retenir 0,91. C'etait faux, et la meme erreur a valorise
+    un M4A4 | Radiation Hazard (FT) a 165 EUR sur UNE vente alors qu'un
+    exemplaire etait affiche a 35,65.
+
+    On ne vend pas au-dessus de la plus basse annonce : personne n'achete le
+    second exemplaire quand le premier est moins cher. Les deux bases
+    coincident donc ici, et c'est normal.
     """
     from tradeup.fees import steam_net_proceeds
 
@@ -334,10 +339,9 @@ def test_un_prix_negocie_superieur_a_l_annonce_distingue_les_deux_bases():
     ventes = _pricer_historique({nom: 0.88}, {nom: 0.91}, "sales")
     annonces = _pricer_historique({nom: 0.88}, {nom: 0.91}, "listing")
 
-    assert ventes.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(
-        steam_net_proceeds(0.91))
-    assert annonces.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(
-        steam_net_proceeds(0.88))
+    attendu = pytest.approx(steam_net_proceeds(0.88))
+    assert ventes.sell_net(SKIN, Wear.FACTORY_NEW) == attendu
+    assert annonces.sell_net(SKIN, Wear.FACTORY_NEW) == attendu
 
 
 def test_sans_historique_de_vente_on_retombe_sur_l_annonce():

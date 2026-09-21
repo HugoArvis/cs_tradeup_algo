@@ -268,6 +268,24 @@ class Journal:
         sortie.sort(key=lambda d: -d["profitability"])
         return sortie
 
+    def sweep_summary(self, rarity: str, *, max_age: float = 36 * 3600) -> dict:
+        """Ce que le dernier balayage a fait, rentable ou non.
+
+        "Aucun contrat rentable" et "aucun balayage" produisent le meme ecran
+        vide et appellent des reactions opposees : attendre dans un cas,
+        lancer un calcul dans l'autre. Les confondre a deja coute une
+        apres-midi sur ce projet.
+        """
+        row = self._conn.execute(
+            """SELECT COUNT(DISTINCT collection_id) AS n, MAX(created_at) AS dernier
+               FROM plans WHERE rarity = ? AND created_at >= ?""",
+            (rarity, time.time() - max_age),
+        ).fetchone()
+        return {
+            "collections": row["n"] or 0,
+            "dernier": row["dernier"],
+        }
+
     def plan_payload(self, plan_id: str) -> dict | None:
         row = self._conn.execute(
             "SELECT payload FROM plans WHERE id = ?", (plan_id,)
