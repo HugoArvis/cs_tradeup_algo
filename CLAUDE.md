@@ -318,6 +318,27 @@ moteur produit déjà. Deux pièges :
   (`stattrak`, lui, est correctement réparti 754/697). Il ne distingue rien et ne
   doit servir à aucune décision — il vient tel quel de l'API source.
 
+**Les caisses SONT dans la base, sous un autre nom.** Valve appelle le
+conteneur « Clutch Case » et sa collection « The Clutch Collection » : chercher
+« Case » parmi les noms de collections n'en trouve qu'une seule et fait croire
+à un trou. 39 des 43 caisses connues sont présentes avec tout leur contenu ;
+les 4 absentes sont les trois « CS:GO Weapon Case » d'origine et un conteneur
+spécial, sans Covert exploitable. `sans_collection` vaut **0** au rebuild : rien
+n'est écarté faute de collection.
+
+Leur poids dépend entièrement de la rareté d'entrée, parce qu'une caisse ne
+descend jamais sous le Mil-Spec :
+
+| rarété d'entrée | collections | dont caisses |
+|---|---|---|
+| Consumer / Industrial | 38 / 46 | **0** |
+| Mil-Spec | 88 | 39 (44 %) |
+| Restricted | 78 | 39 (50 %) |
+| Classified | 65 | 39 (60 %) |
+
+C'est aussi pourquoi l'Industrial est si pauvre : c'est la seule zone où les
+caisses n'apportent rien.
+
 **Le contrat vers un GOLD est une autre mécanique** (module `gold`, commande
 `knife`) : **cinq** Covert d'une même **caisse** — pas dix, pas une collection —
 donnent un couteau ou des gants de son pool, à probabilité **uniforme**
