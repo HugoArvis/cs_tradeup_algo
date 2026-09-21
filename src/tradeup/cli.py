@@ -1265,6 +1265,19 @@ def cmd_sweep(args) -> int:
             print(f"  [--] {col.name} : pas assez d'annonces", file=sys.stderr)
             continue
 
+        # Une sortie sans prix vaut ZERO dans l'EV, ce qui produit un plan
+        # d'apparence normale et entierement faux. C'est arrive : un balayage
+        # lance pendant un refus de Steam a enregistre The Bank Collection
+        # avec ses trois sorties a 0.00, cout 0.64, profit -0.64. Le plan
+        # n'etait pas perdant, il n'etait pas CALCULE -- et rien ne l'aurait
+        # dit. On refuse de l'enregistrer.
+        manquant = plan.result.unpriced_probability
+        if manquant > 0.02:
+            echecs += 1
+            print(f"  [!!] {col.name} : {manquant:.0%} de la sortie sans prix, "
+                  f"non enregistre", file=sys.stderr)
+            continue
+
         payload = _plan_payload(plan, args.currency)
         journal.save_plan(payload, collection_id=col.id, rarity=args.rarity)
         prof = payload["profitability"]

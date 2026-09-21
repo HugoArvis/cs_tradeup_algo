@@ -464,3 +464,63 @@ def test_la_base_de_prix_ventes_change_le_verdict(app):
     ev = sum(steam_net_proceeds(m) for _, m in sorties) / 3
     assert ev / (0.11 * 10) == pytest.approx(0.815, abs=0.01)
     assert ev / (0.09 * 10) == pytest.approx(1.00, abs=0.01)
+
+
+def test_un_plan_aux_sorties_non_cotees_nest_pas_enregistre(app, monkeypatch):
+    """Une sortie sans prix vaut ZERO dans l'EV, pas "inconnu".
+
+    Mesure du 21 septembre : un balayage lance pendant un refus de Steam a
+    enregistre The Bank Collection avec ses trois sorties a 0.00, cout 0.64,
+    profit -0.64. Le plan n'etait pas perdant, il n'etait pas CALCULE -- et
+    rien dans son apparence ne le disait.
+    """
+    class FauxResultat:
+        unpriced_probability = 1.0
+        cost = 0.64
+        ev_net = 0.0
+
+    class FauxPlan:
+        result = FauxResultat()
+
+    monkeypatch.setattr("tradeup.web.build_plan", lambda *a, **k: FauxPlan())
+    monkeypatch.setattr(app, "load_currency", lambda: None)
+    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: None)
+    monkeypatch.setattr(app, "revente", lambda: None)
+
+    batch = app.start_batch("mil-spec")
+    for _ in range(200):
+        if batch.state in ("finished", "stopped"):
+            break
+        time.sleep(0.05)
+
+    assert batch.done == [], "un plan non cote ne doit pas etre retenu"
+    assert batch.failed, "il doit etre signale comme echec"
+    assert any("non cotee" in f["error"] for f in batch.failed)
+
+
+def test_un_plan_non_cote_ne_fait_pas_sauter_la_collection_suivante(app, monkeypatch):
+    """La file ne doit etre depilee qu'une fois.
+
+    Un `pop` en trop ferait disparaitre la collection SUIVANTE du balayage,
+    sans erreur ni trace.
+    """
+    class FauxResultat:
+        unpriced_probability = 1.0
+        cost = ev_net = 0.0
+
+    class FauxPlan:
+        result = FauxResultat()
+
+    monkeypatch.setattr("tradeup.web.build_plan", lambda *a, **k: FauxPlan())
+    monkeypatch.setattr(app, "load_currency", lambda: None)
+    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: None)
+    monkeypatch.setattr(app, "revente", lambda: None)
+
+    batch = app.start_batch("mil-spec")
+    for _ in range(200):
+        if batch.state in ("finished", "stopped"):
+            break
+        time.sleep(0.05)
+
+    # Les DEUX collections doivent avoir ete tentees, pas une seule.
+    assert len(batch.failed) == 2, f"file mal depilee : {batch.failed}"

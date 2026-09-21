@@ -572,6 +572,18 @@ class App:
                 )
                 continue
 
+            # Meme garde que `sweep` : une sortie sans prix vaut zero dans
+            # l'EV et donne un plan d'apparence normale, entierement faux.
+            # `pending` a deja ete depile juste au-dessus : ne pas le refaire,
+            # sinon la collection SUIVANTE disparait du balayage en silence.
+            if plan.result.unpriced_probability > 0.02:
+                batch.failed.append(
+                    {"collection": col.name,
+                     "rarity": RARITES[batch.rarity].label,
+                     "error": "sorties non cotees"}
+                )
+                continue
+
             payload = self._plan_dict(plan)
             plan_id = self.journal.save_plan(
                 payload, collection_id=cid, rarity=batch.rarity
