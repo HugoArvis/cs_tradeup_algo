@@ -268,6 +268,21 @@ class Journal:
         sortie.sort(key=lambda d: -d["profitability"])
         return sortie
 
+    def last_swept(self, rarity: str) -> dict[str, float]:
+        """Quand chaque collection a-t-elle ete calculee pour la derniere fois ?
+
+        Sert a REPRENDRE un balayage la ou il s'est arrete. Sans cet ordre, un
+        balayage coupe par le quota ou par la limite de duree repart de la
+        premiere collection la nuit suivante -- et refait eternellement les
+        memes, sans jamais atteindre les autres.
+        """
+        rows = self._conn.execute(
+            """SELECT collection_id, MAX(created_at) AS dernier FROM plans
+               WHERE rarity = ? GROUP BY collection_id""",
+            (rarity,),
+        ).fetchall()
+        return {r["collection_id"]: r["dernier"] for r in rows}
+
     def sweep_summary(self, rarity: str, *, max_age: float = 36 * 3600) -> dict:
         """Ce que le dernier balayage a fait, rentable ou non.
 

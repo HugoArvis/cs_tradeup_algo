@@ -1237,12 +1237,29 @@ def cmd_sweep(args) -> int:
         voulus = {c.lower() for c in args.collections}
         cols = [c for c in cols if c.name.lower() in voulus]
 
+    # REPRENDRE, pas recommencer : les collections jamais calculees d'abord,
+    # puis les plus anciennes. Un balayage coupe par le quota ou par la limite
+    # de duree repartirait sinon de la premiere et referait eternellement les
+    # memes -- le meme piege que le TTL qui ne remontait pas jusqu'a la source.
+    vues = journal.last_swept(args.rarity)
+    cols.sort(key=lambda c: vues.get(c.id, 0.0))
+    jamais = sum(1 for c in cols if c.id not in vues)
+    if jamais:
+        print(f"  {jamais} collection(s) jamais calculee(s), traitees en "
+              f"premier.", file=sys.stderr)
+
     print(f"{len(cols)} collections a calculer en {rarity.label}.", file=sys.stderr)
     file = list(cols)
     faits, echecs, rentables = 0, 0, 0
     debut = _t.time()
 
+    limite = args.max_minutes * 60
     while file:
+        if _t.time() - debut > limite:
+            print(f"  budget de {args.max_minutes} min atteint, arret propre "
+                  f"({faits}/{len(cols)}). La suite ira au prochain passage.",
+                  file=sys.stderr)
+            break
         col = file[0]
         try:
             plan = build_plan(db, col, rarity, source, sell_source=steam,
@@ -1635,6 +1652,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--collections", nargs="*", default=None)
     s.add_argument("--rate", type=int, default=8,
                    help="requetes CSFloat par minute (defaut 8)")
+    s.add_argument("--max-minutes", type=int, default=150,
+                   help="budget de temps par passage (defaut 150). Le "
+                        "planificateur coupe a 3 h : mieux vaut s'arreter "
+                        "proprement avant, le reste ira au prochain passage")
     s.add_argument("--pause", type=int, default=600,
                    help="pause en secondes quand le quota est epuise (defaut 600)")
     s.add_argument("--currency", default="EUR", choices=sorted(CURRENCIES))

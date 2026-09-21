@@ -442,6 +442,20 @@ médian et maximal ; `scan` et `orders` alertent au-delà de 24 h.
 pas entrer dans un contrat avant 7 jours ; un achat sur le marché Steam le peut.
 Le compteur part à la réception de chaque objet.
 
+**Un balayage long doit REPRENDRE, jamais recommencer.** 88 collections
+Mil-Spec en `plan` depassent largement une nuit : le quota CSFloat s'épuise, ou
+le planificateur coupe à 3 h. Si le passage suivant repart de la première
+collection, il refait éternellement les mêmes et celles de la fin ne sont
+**jamais** calculées. `Journal.last_swept()` donne la date du dernier plan par
+collection ; `sweep` trie dessus — jamais vues d'abord, puis les plus
+anciennes — et s'arrête proprement à `--max-minutes` (150 par défaut, sous la
+limite de 3 h de la tâche). La couverture se complète alors en quelques nuits
+au lieu de stagner.
+
+C'est le même piège que le TTL qui ne remontait pas jusqu'à la source : dans
+les deux cas le travail semble avancer, la barre de progression est normale, et
+le résultat n'arrive jamais.
+
 ## Contraintes externes
 
 Le quota CSFloat porte sur une fenêtre longue, pas seulement par minute. Un 429

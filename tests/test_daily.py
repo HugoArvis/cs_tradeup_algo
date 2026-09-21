@@ -373,3 +373,42 @@ def test_pas_assez_dannonces_se_distingue_dun_contrat_perdant(db, monkeypatch):
         {c.id: c for c in db.tradeable_collections(Rarity.INDUSTRIAL)},
         Rarity.INDUSTRIAL, None, combien=1)
     assert sortie[0].motif_echec == "pas assez d'annonces"
+
+
+# --- Reprise d'un balayage interrompu ----------------------------------------
+
+
+def test_le_balayage_reprend_par_les_collections_jamais_faites(tmp_path):
+    """Sans cet ordre, un balayage coupe refait eternellement les memes.
+
+    88 collections Mil-Spec a 8 requetes/minute depassent largement le budget
+    d'une nuit. Si le passage repart chaque fois de la premiere, les
+    collections de la fin ne sont JAMAIS calculees -- le meme piege que le TTL
+    qui ne remontait pas jusqu'a la source.
+    """
+    from tradeup.journal import Journal
+
+    j = Journal(Path(tmp_path) / "j.db")
+    plan = {"collection": "A", "cost": 1.0, "net": 1.0, "profit": 0.0,
+            "roi": 0.0, "avg_float": 0.1, "inputs": [], "outcomes": []}
+    j.save_plan(plan, collection_id="col_a", rarity="mil-spec")
+    time.sleep(0.02)
+    j.save_plan(plan, collection_id="col_b", rarity="mil-spec")
+
+    vues = j.last_swept("mil-spec")
+    assert set(vues) == {"col_a", "col_b"}
+    assert vues["col_b"] > vues["col_a"], "col_b est la plus recente"
+
+    # L'ordre de traitement : jamais vues d'abord, puis la plus ancienne.
+    ids = ["col_c", "col_b", "col_a"]
+    ids.sort(key=lambda i: vues.get(i, 0.0))
+    assert ids == ["col_c", "col_a", "col_b"]
+    j.close()
+
+
+def test_une_rarete_jamais_balayee_ne_casse_pas_l_ordre(tmp_path):
+    from tradeup.journal import Journal
+
+    j = Journal(Path(tmp_path) / "j.db")
+    assert j.last_swept("mil-spec") == {}
+    j.close()
