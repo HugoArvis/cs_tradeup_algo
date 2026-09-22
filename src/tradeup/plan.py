@@ -82,6 +82,11 @@ class CSFloatPricer:
         # balayage a fait 9 collections sur 88 en 155 minutes, presque
         # entierement passees a attendre des 429.
         self.echecs_vente = 0
+        # Nombre de sorties valorisees par REPLI sur CSFloat, faute de prix
+        # Steam. Un plan qui en contient reste exploitable -- mais il est
+        # PRUDENT, pas exact, et l'afficher sans le dire serait mentir par
+        # omission dans le bon sens.
+        self.replis = 0
 
     def _listings(self, name: str) -> list[tuple[float, float]]:
         """Carnet nettoye, utilisable pour valoriser une sortie de trade-up.
@@ -159,6 +164,13 @@ class CSFloatPricer:
         Elle porte aussi le volume : la liquidite arrive donc sans requete
         supplementaire, la ou l'interroger sur CSFloat coute un appel de plus.
         """
+        if self.revente_en_panne:
+            # Ne plus interroger un marche dont on sait qu'il refuse : chaque
+            # tentative coute 75 s de backoff (5+10+20+40) pour un echec
+            # certain. Sans ce court-circuit, le repli fonctionne mais le
+            # balayage reste aussi lent qu'avant -- 37 minutes d'attente par
+            # collection, pour un resultat connu des le troisieme nom.
+            return None
         if name not in self._ventes:
             try:
                 self._ventes[name] = self.sell_source.fetch(name)
@@ -179,16 +191,40 @@ class CSFloatPricer:
         """
         return self.echecs_vente >= 3
 
+    def _net_ici(self, name: str) -> float | None:
+        """Valorisation de REPLI : la sortie revendue sur CSFloat.
+
+        Mesure en direct sur trois sorties Mil-Spec : net Steam 4,01 / 2,09 /
+        1,00 EUR contre 3,42 / 1,52 / 0,75 sur CSFloat, soit **17 a 37 % de
+        moins**. Le repli est donc conservateur par construction : un contrat
+        rentable ainsi valorise l'est FORCEMENT sur Steam. Il ne produit pas
+        de faux positifs, seulement des occasions manquees -- c'est le bon
+        sens de l'erreur pour un outil qui engage de l'argent reel.
+
+        Sans ce repli, une panne du marche de revente rend tout le balayage
+        inexploitable : mesure du 22 septembre, 9 collections sur 88 en 155
+        minutes et zero enregistree.
+        """
+        if self.source is None:
+            # Aucun marche d'achat pour se rabattre : la sortie n'a pas de
+            # prix, et c'est un fait, pas une panne a masquer.
+            return None
+        p = self._lowest(name)
+        if p is None:
+            return None
+        self.replis += 1
+        return p * (1 - self.sell_fee) * (1 - self.safety_margin)
+
     def _net_ailleurs(self, name: str) -> float | None:
         q = self._quote_de_vente(name)
         if q is None:
-            return None
+            return self._net_ici(name)
         affiche = (
             q.realised_reference() if self.sell_basis == "sales"
             else q.sell_reference()
         )
         if affiche is None:
-            return None
+            return self._net_ici(name)
         # `net_from_sale` du modele Steam reproduit l'arrondi reel, plancher de
         # 0.01 par frais compris. Un pourcentage moyen ne le remplacerait pas :
         # c'est precisement en bas de l'echelle que l'ecart devient decisif.
@@ -299,6 +335,15 @@ class Plan:
         if self.downgrade_net is None:
             return None
         return self.downgrade_net - self.result.cost
+
+    # Nombre de sorties valorisees par repli sur CSFloat faute de prix Steam.
+    # Un plan qui en contient est PRUDENT, pas exact : la revente reelle sur
+    # Steam rapporterait 17 a 37 % de plus.
+    replis: int = 0
+
+    @property
+    def valorisation_de_repli(self) -> bool:
+        return self.replis > 0
 
     exit_value: float | None = None  # produit net d'une revente des entrees
     liquidity: dict = field(default_factory=dict)  # nom de sortie -> stats de vente
@@ -494,6 +539,7 @@ def build_plan(
                 collection=collection,
                 rarity=rarity,
                 listings_examined=examinees,
+                replis=pricer.replis,
                 downgrade_net=_net_si_palier_rate(result, pricer),
                 exit_value=_valeur_de_revente(selection, pricer, sell_fee),
                 liquidity={

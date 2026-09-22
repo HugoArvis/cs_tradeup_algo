@@ -200,10 +200,35 @@ def test_le_plancher_de_frais_steam_devore_les_petits_montants():
     assert 0.86 < net / 10.0 < 0.88  # regime normal : ~13 %
 
 
-def test_une_sortie_non_cotee_sur_le_marche_de_vente_ne_vaut_rien():
-    """Mieux vaut une sortie sans prix qu'un prix invente."""
+def test_sans_prix_de_vente_ni_marche_de_repli_la_sortie_ne_vaut_rien():
+    """Mieux vaut une sortie sans prix qu'un prix invente.
+
+    Le repli sur CSFloat suppose une source CSFloat. Sans elle, il n'y a rien
+    a quoi se rabattre -- et c'est un fait, pas une panne a masquer.
+    """
     pricer, _ = _pricer({})
+    assert pricer.source is None
     assert pricer.sell_net(SKIN, Wear.FACTORY_NEW) is None
+
+
+def test_une_sortie_sans_prix_steam_se_rabat_sur_csfloat():
+    """Le repli est CONSERVATEUR : CSFloat rend 17 a 37 % de moins que Steam.
+
+    Un contrat rentable ainsi valorise l'est donc forcement sur Steam. Sans ce
+    repli, une panne de Steam rend tout le balayage inexploitable -- mesure du
+    22 septembre, 9 collections sur 88 et zero enregistree.
+    """
+    from tradeup.fees import STEAM
+    from tradeup.plan import CSFloatPricer
+
+    nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
+    marche = FauxMarcheDeVente({})          # Steam ne connait rien
+    p = CSFloatPricer(source=object(), sell_source=marche, sell_fees=STEAM,
+                      safety_margin=0.0, sell_fee=0.02)
+    p._book[nom] = [(0.01, 10.0)]           # mais CSFloat a des annonces
+
+    assert p.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(9.8)
+    assert p.replis == 1
 
 
 def test_le_float_ne_change_pas_le_prix_quand_on_revend_sur_steam():
@@ -404,3 +429,33 @@ def test_une_cotation_reussie_remet_le_compteur_a_zero():
     for i in range(6):
         p._quote_de_vente(f"objet {i}")
     assert not p.revente_en_panne
+
+
+def test_un_marche_en_panne_nest_plus_interroge():
+    """Le repli ne suffit pas : il faut aussi cesser d'attendre.
+
+    Chaque tentative sur un marche qui refuse coute 75 s de backoff. Sans ce
+    court-circuit, le balayage se rabat correctement mais reste aussi lent
+    qu'avant -- 37 minutes d'attente par collection pour un echec connu des le
+    troisieme nom.
+    """
+    from tradeup.fees import STEAM
+    from tradeup.plan import CSFloatPricer
+
+    class MarcheMortCompteur:
+        name = "steam"
+
+        def __init__(self):
+            self.appels = 0
+
+        def fetch(self, nom, *, use_cache=True):
+            self.appels += 1
+            raise RuntimeError("429")
+
+    marche = MarcheMortCompteur()
+    p = CSFloatPricer(source=None, sell_source=marche, sell_fees=STEAM)
+    for i in range(20):
+        p._quote_de_vente(f"objet {i}")
+
+    assert p.revente_en_panne
+    assert marche.appels == 3, f"{marche.appels} appels au lieu de 3"

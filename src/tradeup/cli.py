@@ -1315,8 +1315,12 @@ def cmd_sweep(args) -> int:
         if prof >= 1.0:
             rentables += 1
         marque = "<<" if prof >= 1.0 else "  "
+        # Un plan valorise par repli est PRUDENT, pas exact : la revente
+        # reelle sur Steam rapporterait 17 a 37 % de plus. Le taire ferait
+        # passer une sous-estimation pour une mesure.
+        repli = f"  [repli CSFloat x{plan.replis}]" if plan.valorisation_de_repli else ""
         print(f"  [{prof:>5.0%}] {col.name:<40} {marque} "
-              f"({faits}/{len(cols)})", file=sys.stderr)
+              f"({faits}/{len(cols)}){repli}", file=sys.stderr)
 
     duree = (_t.time() - debut) / 60
     print()
@@ -1349,6 +1353,7 @@ def _plan_payload(plan, devise: str) -> dict:
         "best_profit": (round(plan.best_profit, 4)
                         if plan.best_profit is not None else None),
         "all_profitable": plan.all_outcomes_profitable,
+        "replis": plan.replis,
         "downgrade_profit": (round(plan.downgrade_profit, 4)
                              if plan.downgrade_profit is not None else None),
         "exit_loss": None, "exit_loss_ratio": None,

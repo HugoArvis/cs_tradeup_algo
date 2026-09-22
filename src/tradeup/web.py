@@ -685,6 +685,7 @@ class App:
                 self.conv(p.best_profit) if p.best_profit is not None else None
             ),
             "all_profitable": p.all_outcomes_profitable,
+            "replis": p.replis,
             "exit_loss": (
                 self.conv(p.exit_loss) if p.exit_loss is not None else None
             ),
@@ -1281,6 +1282,12 @@ function carte(p, planId, archive) {
     sont figées au moment du calcul : les annonces ont pu partir et les prix
     bouger. Relancez une recherche avant d’acheter.</div>`);
 
+  if (p.replis) {
+    bloc.push(`<div class="warn"><b>Valorisation prudente.</b>
+      ${p.replis} sortie(s) n’avaient pas de prix Steam et ont été valorisées
+      sur CSFloat, qui rend <b>17 à 37 % de moins</b>. Le gain réel sera donc
+      supérieur à celui affiché — jamais inférieur de ce fait.</div>`);
+  }
   if (p.all_profitable) {
     bloc.push(`<div class="warn ok"><b>Toutes les sorties sont rentables.</b>
       Quel que soit le skin obtenu vous gagnez, entre

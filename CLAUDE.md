@@ -442,6 +442,22 @@ médian et maximal ; `scan` et `orders` alertent au-delà de 24 h.
 pas entrer dans un contrat avant 7 jours ; un achat sur le marché Steam le peut.
 Le compteur part à la réception de chaque objet.
 
+**Quand le marché de revente refuse, on se rabat sur celui d'achat.**
+`CSFloatPricer._net_ici()` valorise alors la sortie sur CSFloat. Le repli est
+**conservateur par construction** : mesuré en direct sur trois sorties
+Mil-Spec, CSFloat rend 17 à 37 % de moins que Steam. Un contrat rentable ainsi
+valorisé l'est donc *forcément* sur Steam — pas de faux positif, seulement des
+occasions manquées, ce qui est le bon sens de l'erreur pour un outil qui engage
+de l'argent. `Plan.replis` compte les sorties concernées, et l'interface comme
+le balayage l'affichent : une sous-estimation tue doit rester visible.
+
+Deux mécanismes s'ajoutent, et le second n'est pas optionnel :
+`revente_en_panne` (trois refus d'affilée, une réussite remettant le compteur
+à zéro) **coupe les appels** au marché défaillant. Sans ce court-circuit le
+repli fonctionne mais ne fait rien gagner : chaque sortie paie quand même 75 s
+de backoff (5+10+20+40). Mesuré le 22 septembre avant correction — **9
+collections sur 88 en 155 minutes, zéro enregistrée**.
+
 **Un balayage long doit REPRENDRE, jamais recommencer.** 88 collections
 Mil-Spec en `plan` depassent largement une nuit : le quota CSFloat s'épuise, ou
 le planificateur coupe à 3 h. Si le passage suivant repart de la première
