@@ -352,3 +352,55 @@ def test_sans_historique_de_vente_on_retombe_sur_l_annonce():
     p = _pricer_historique({nom: 0.50}, {}, "sales")
     assert p.sell_net(SKIN, Wear.FACTORY_NEW) == pytest.approx(
         steam_net_proceeds(0.50))
+
+
+def test_un_marche_de_revente_en_panne_est_reconnu():
+    """Trois refus d'affilee ne sont plus un hasard, c'est une panne.
+
+    Mesure du 22 septembre : un balayage de nuit a fait 9 collections sur 88
+    en 155 minutes, presque entierement passees a attendre des 429 -- 75 s de
+    backoff par nom, pour un echec certain d'avance.
+    """
+    import urllib.error
+
+    from tradeup.fees import STEAM
+    from tradeup.plan import CSFloatPricer
+
+    class MarcheMort:
+        name = "steam"
+
+        def fetch(self, nom, *, use_cache=True):
+            raise urllib.error.URLError("429")
+
+    p = CSFloatPricer(source=None, sell_source=MarcheMort(), sell_fees=STEAM)
+    assert not p.revente_en_panne
+    for i in range(3):
+        p.sell_net(SKIN, Wear.FACTORY_NEW) if i else None
+        p._quote_de_vente(f"objet {i}")
+    assert p.revente_en_panne
+
+
+def test_une_cotation_reussie_remet_le_compteur_a_zero():
+    """Deux echecs isoles separes par une reussite ne sont pas une panne."""
+    from tradeup.fees import STEAM
+    from tradeup.plan import CSFloatPricer
+
+    class MarcheCapricieux:
+        name = "steam"
+
+        def __init__(self):
+            self.n = 0
+
+        def fetch(self, nom, *, use_cache=True):
+            from tradeup.pricing.base import Quote
+
+            self.n += 1
+            if self.n % 2:
+                raise RuntimeError("refus")
+            return Quote(market_hash_name=nom, source="steam", lowest_price=1.0,
+                         median_price=1.0, volume=50, currency="EUR")
+
+    p = CSFloatPricer(source=None, sell_source=MarcheCapricieux(), sell_fees=STEAM)
+    for i in range(6):
+        p._quote_de_vente(f"objet {i}")
+    assert not p.revente_en_panne

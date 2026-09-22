@@ -1290,6 +1290,19 @@ def cmd_sweep(args) -> int:
         # n'etait pas perdant, il n'etait pas CALCULE -- et rien ne l'aurait
         # dit. On refuse de l'enregistrer.
         manquant = plan.result.unpriced_probability
+        if manquant >= 0.99:
+            # Toutes les sorties sans prix : ce n'est pas cette collection qui
+            # pose probleme, c'est le marche de revente. Insister coute 75 s de
+            # backoff par nom pour un echec certain.
+            echecs += 1
+            print(f"  [!!] {col.name} : marche de revente indisponible, arret.",
+                  file=sys.stderr)
+            print(file=sys.stderr)
+            print("  Le balayage s'arrete : sans prix de revente, aucun "
+                  "contrat n'est calculable.", file=sys.stderr)
+            print("  Les collections deja faites sont au journal ; la reprise "
+                  "partira des suivantes.", file=sys.stderr)
+            break
         if manquant > 0.02:
             echecs += 1
             print(f"  [!!] {col.name} : {manquant:.0%} de la sortie sans prix, "

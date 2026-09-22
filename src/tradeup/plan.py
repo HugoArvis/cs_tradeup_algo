@@ -76,6 +76,12 @@ class CSFloatPricer:
         # des annonces CSFloat reelles, au prix affiche.
         self.sell_basis = sell_basis
         self._ventes: dict[str, Quote | None] = {}
+        # Un marche de revente qui refuse TOUT n'est pas une suite d'echecs
+        # isolees, c'est une panne. La distinguer evite de payer 75 s de
+        # backoff par nom pour un resultat connu d'avance : une nuit de
+        # balayage a fait 9 collections sur 88 en 155 minutes, presque
+        # entierement passees a attendre des 429.
+        self.echecs_vente = 0
 
     def _listings(self, name: str) -> list[tuple[float, float]]:
         """Carnet nettoye, utilisable pour valoriser une sortie de trade-up.
@@ -156,10 +162,22 @@ class CSFloatPricer:
         if name not in self._ventes:
             try:
                 self._ventes[name] = self.sell_source.fetch(name)
+                self.echecs_vente = 0
             except Exception:  # noqa: BLE001 - une sortie non cotee vaut None
+                self.echecs_vente += 1
                 log.warning("Prix de revente indisponible pour %s", name)
                 self._ventes[name] = None
         return self._ventes[name]
+
+    @property
+    def revente_en_panne(self) -> bool:
+        """Le marche de revente refuse-t-il systematiquement ?
+
+        Trois refus d'affilee ne sont plus un hasard. Continuer coute 75 s de
+        backoff par nom pour un resultat connu : mieux vaut rendre la main et
+        reprendre quand le marche rouvre.
+        """
+        return self.echecs_vente >= 3
 
     def _net_ailleurs(self, name: str) -> float | None:
         q = self._quote_de_vente(name)
