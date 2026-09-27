@@ -1232,6 +1232,27 @@ def cmd_sweep(args) -> int:
     steam = SteamMarket(currency=args.currency, cache=QuoteCache(ttl_seconds=6 * 3600),
                         calls_per_minute=15, ttl_seconds=6 * 3600)
 
+    # CSFloat cote en USD, Steam dans la devise demandee. Sans conversion, le
+    # cout est en dollars et la revente en euros : le rapport des deux n'est
+    # plus une profitabilite, c'est un taux de change deguise. Mesure sur The
+    # Dead Hand Collection -- 110 % annonce contre 126 % reel, l'erreur allant
+    # ici dans le sens PESSIMISTE (les montants USD sont numeriquement plus
+    # gros que leur equivalent en euros), donc elle faisait ecarter des
+    # contrats rentables.
+    #
+    # On calcule en USD de bout en bout, puis on convertit le resultat une
+    # seule fois, a l'enregistrement.
+    try:
+        usd_vers_devise = source.usd_rate(args.currency)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Taux de change indisponible ({type(exc).__name__}) : les "
+              f"montants resteraient en USD alors que Steam cote en "
+              f"{args.currency}. Rien ne serait comparable -- arret.",
+              file=sys.stderr)
+        journal.close()
+        return 1
+    print(f"1 USD = {usd_vers_devise:.4f} {args.currency}", file=sys.stderr)
+
     cols = list(db.tradeable_collections(rarity))
     if args.collections:
         voulus = {c.lower() for c in args.collections}
@@ -1263,7 +1284,8 @@ def cmd_sweep(args) -> int:
         col = file[0]
         try:
             plan = build_plan(db, col, rarity, source, sell_source=steam,
-                              sell_fees=FEE_MODELS["steam"])
+                              sell_fees=FEE_MODELS["steam"],
+                              sell_to_usd=1.0 / usd_vers_devise)
         except RateLimited:
             # On NE retire PAS la collection de la file : le quota reviendra.
             print(f"  quota epuise, pause de {args.pause // 60} min "
@@ -1309,7 +1331,7 @@ def cmd_sweep(args) -> int:
                   f"non enregistre", file=sys.stderr)
             continue
 
-        payload = _plan_payload(plan, args.currency)
+        payload = _plan_payload(plan, args.currency, usd_vers_devise)
         journal.save_plan(payload, collection_id=col.id, rarity=args.rarity)
         prof = payload["profitability"]
         if prof >= 1.0:
@@ -1331,40 +1353,50 @@ def cmd_sweep(args) -> int:
     return 10 if rentables else 0
 
 
-def _plan_payload(plan, devise: str) -> dict:
-    """Serialise un plan pour le journal, format identique a celui du web."""
+def _plan_payload(plan, devise: str, taux: float = 1.0) -> dict:
+    """Serialise un plan pour le journal, montants convertis dans `devise`.
+
+    Le calcul se fait en USD de bout en bout -- CSFloat y cote, et la revente
+    Steam y est ramenee par `sell_to_usd`. La conversion vers la devise du
+    compte n'a lieu QU'ICI, une seule fois : convertir en cours de route
+    multiplierait les occasions de melanger les deux.
+    """
     r = plan.result
+
+    def c(v):
+        return round(v * taux, 4)
+
     return {
         "collection": plan.collection.name,
         "rarity": plan.rarity.label,
         "rarity_target": plan.rarity.next_up.label,
         "currency": devise,
-        "cost": round(r.cost, 4), "net": round(r.ev_net, 4),
-        "profit": round(r.ev_profit, 4), "roi": round(r.roi, 4),
+        "cost": c(r.cost), "net": c(r.ev_net),
+        "profit": c(r.ev_profit), "roi": round(r.roi, 4),
         "profitability": round(r.profitability, 4),
         "win_probability": round(r.profit_probability, 4),
         "outcomes_count": r.distinct_outcomes,
-        "stdev": round(r.stdev, 4),
+        "stdev": c(r.stdev),
         "avg_float": round(r.avg_input_float, 5),
         "listings_examined": plan.listings_examined,
         "float_slack": round(plan.float_slack, 5),
-        "worst_profit": (round(plan.worst_profit, 4)
+        "worst_profit": (c(plan.worst_profit)
                          if plan.worst_profit is not None else None),
-        "best_profit": (round(plan.best_profit, 4)
+        "best_profit": (c(plan.best_profit)
                         if plan.best_profit is not None else None),
         "all_profitable": plan.all_outcomes_profitable,
         "replis": plan.replis,
-        "downgrade_profit": (round(plan.downgrade_profit, 4)
+        "downgrade_profit": (c(plan.downgrade_profit)
                              if plan.downgrade_profit is not None else None),
         "exit_loss": None, "exit_loss_ratio": None,
         "price_drop_tolerance": None,
         "inputs": [{"name": o.name, "float": round(o.float_value, 4),
-                    "price": round(o.unit_cost, 4), "url": o.url}
+                    "price": c(o.unit_cost), "url": o.url}
                    for o in sorted(plan.options,
                                    key=lambda o: (o.skin.name, o.float_value))],
         "outcomes": [{"name": o.name, "probability": round(o.probability, 4),
                       "float": round(o.float_value, 4),
-                      "net": round(o.net_value, 4)} for o in r.outcomes],
+                      "net": c(o.net_value)} for o in r.outcomes],
     }
 
 

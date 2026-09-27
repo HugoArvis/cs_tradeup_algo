@@ -328,3 +328,66 @@ def test_aucun_nom_non_defini_dans_le_paquet():
                        capture_output=True, text=True)
     graves = [l for l in r.stdout.splitlines() if "undefined name" in l]
     assert not graves, "noms non definis : " + " | ".join(graves)
+
+
+def test_le_payload_du_balayage_convertit_tous_les_montants():
+    """CSFloat cote en USD, Steam dans la devise du compte.
+
+    Sans conversion, le cout est en dollars et la revente en euros : le
+    rapport des deux n'est plus une profitabilite mais un taux de change
+    deguise. Mesure sur The Dead Hand Collection -- 110 % annonce contre
+    126 % reel. L'erreur allait dans le sens PESSIMISTE, les montants USD
+    etant numeriquement plus gros que leur equivalent en euros : elle
+    faisait donc ecarter des contrats rentables.
+    """
+    class FauxResultat:
+        cost = 10.0
+        ev_net = 12.0
+        ev_profit = 2.0
+        roi = 0.2
+        profitability = 1.2
+        profit_probability = 0.8
+        distinct_outcomes = 1
+        stdev = 1.0
+        avg_input_float = 0.1
+        outcomes = ()
+
+    class FauxSkin:
+        name = "X"
+
+    class FauxOption:
+        name = "X (Factory New)"
+        float_value = 0.01
+        unit_cost = 1.0
+        url = None
+        skin = FauxSkin()
+
+    class FauxRarete:
+        label = "Mil-Spec Grade"
+
+        @property
+        def next_up(self):
+            return self
+
+    class FauxPlan:
+        result = FauxResultat()
+        collection = types.SimpleNamespace(name="C")
+        rarity = FauxRarete()
+        options = (FauxOption(),)
+        listings_examined = 10
+        float_slack = 0.01
+        worst_profit = 1.0
+        best_profit = 3.0
+        all_outcomes_profitable = True
+        downgrade_profit = -1.0
+        replis = 0
+
+    d = cli._plan_payload(FauxPlan(), "EUR", 0.8779)
+
+    assert d["currency"] == "EUR"
+    assert d["cost"] == pytest.approx(8.779)
+    assert d["net"] == pytest.approx(10.5348)
+    assert d["profit"] == pytest.approx(1.7558)
+    assert d["inputs"][0]["price"] == pytest.approx(0.8779)
+    # Le ROI est un RAPPORT : il ne se convertit pas.
+    assert d["roi"] == pytest.approx(0.2)
