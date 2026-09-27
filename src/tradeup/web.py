@@ -1327,10 +1327,17 @@ function carte(p, planId, archive) {
       <span>chances de gagner <b>${((p.win_probability || 0) * 100).toFixed(0)}%</b></span>
     </div>
     ${bloc.join('')}
-    <div class="etape">Méthode d’achat</div>
-    <p class="muted">Ces dix annonces précises, sur CSFloat. Le float de chacune
-    est déjà celui qu’il faut : c’est lui qui décide de l’usure en sortie, donc
-    n’en remplacez aucune par un exemplaire moins cher.</p>
+    <div class="etape">Méthode d’achat — sur ${p.buy_market || 'CSFloat'}</div>
+    <p class="muted"><b>Les prix ci-dessous sont ceux de
+    ${p.buy_market || 'CSFloat'}, pas de Steam</b>, où le même objet coûte
+    généralement plus cher. La revente est estimée sur
+    ${p.sell_market || 'Steam'}. Ces dix annonces sont précises : le float de
+    chacune décide de l’usure en sortie, donc n’en remplacez aucune par un
+    exemplaire moins cher.</p>
+    <p class="muted"><b>Une annonce est unique et publique.</b> Celles-ci
+    peuvent avoir été achetées depuis le calcul — mesuré sur un contrat de
+    15 h d’âge, les cinq entrées annoncées à 0,06 valaient 0,08 à 0,19 le
+    lendemain. Recotez avant d’acheter.</p>
     <div class="scroll"><table>
       <thead><tr><th>Objet</th><th class="num">Float</th>
         <th class="num">Prix</th><th></th></tr></thead>

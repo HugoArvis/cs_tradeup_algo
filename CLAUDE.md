@@ -458,6 +458,22 @@ repli fonctionne mais ne fait rien gagner : chaque sortie paie quand même 75 s
 de backoff (5+10+20+40). Mesuré le 22 septembre avant correction — **9
 collections sur 88 en 155 minutes, zéro enregistrée**.
 
+**Un plan est PERISSABLE, et son prix d'entree n'est pas celui de Steam.**
+Deux confusions distinctes, toutes deux constatees sur le meme contrat le
+27 septembre 2026 :
+
+- `plan` achete sur **CSFloat** et estime la revente sur **Steam**. Verifier une
+  entree sur Steam donne donc un chiffre plus eleve sans que l'un des deux soit
+  faux — mesure sur le M4A4 | Zubastick (WW), **0,07 € sur CSFloat contre 0,11 €
+  sur Steam**. Le payload porte `buy_market` et `sell_market`, et l'interface
+  comme le balayage les nomment : sans cela, l'ecart se lit comme une erreur.
+- une annonce est **unique et publique**. Les cinq entrees annoncees a 0,06 $
+  avaient disparu 15 h plus tard ; les cinq moins cheres valaient alors 0,08 /
+  0,09 / 0,10 / 0,16 / **0,19** — la cinquieme au double de la premiere. Le
+  panier n'etait plus achetable a son prix, et la profitabilite passait de
+  126 % a ~107 %. L'echelle des prix est **raide** en bas de gamme : prendre
+  cinq exemplaires coute bien plus que cinq fois le moins cher.
+
 **Un balayage long doit REPRENDRE, jamais recommencer.** 88 collections
 Mil-Spec en `plan` depassent largement une nuit : le quota CSFloat s'épuise, ou
 le planificateur coupe à 3 h. Si le passage suivant repart de la première

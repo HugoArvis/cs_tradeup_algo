@@ -1270,6 +1270,10 @@ def cmd_sweep(args) -> int:
               f"premier.", file=sys.stderr)
 
     print(f"{len(cols)} collections a calculer en {rarity.label}.", file=sys.stderr)
+    print(f"  ACHAT sur CSFloat, REVENTE estimee sur Steam. Les prix d'entree "
+          f"affiches sont ceux de CSFloat", file=sys.stderr)
+    print(f"  -- verifier une entree sur Steam donnera un chiffre plus eleve, "
+          f"sans que l'un des deux soit faux.", file=sys.stderr)
     file = list(cols)
     faits, echecs, rentables = 0, 0, 0
     debut = _t.time()
@@ -1371,6 +1375,13 @@ def _plan_payload(plan, devise: str, taux: float = 1.0) -> dict:
         "rarity": plan.rarity.label,
         "rarity_target": plan.rarity.next_up.label,
         "currency": devise,
+        # Les entrees sont achetees sur CSFloat, la revente estimee sur Steam.
+        # Sans le dire, un utilisateur verifie les prix d'entree sur Steam et
+        # conclut a une erreur : mesure sur le M4A4 | Zubastick (WW), 0,07 EUR
+        # sur CSFloat contre 0,11 sur Steam. Les deux chiffres sont justes, ce
+        # sont deux marches.
+        "buy_market": "CSFloat",
+        "sell_market": "Steam",
         "cost": c(r.cost), "net": c(r.ev_net),
         "profit": c(r.ev_profit), "roi": round(r.roi, 4),
         "profitability": round(r.profitability, 4),
