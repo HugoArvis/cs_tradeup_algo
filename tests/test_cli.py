@@ -386,6 +386,13 @@ def test_le_payload_du_balayage_convertit_tous_les_montants():
         deep_cost = 11.0           # et plus cher encore sans arriver premier
         deep_profitability = 12.0 / 11.0
         fragile = False
+        float_subi_compatible = True
+
+        def steam_order_budget(self, target_roi=0.20):
+            return 12.0 / 1.2
+
+        def steam_order_discount(self, target_roi=0.20):
+            return 1.0 - (12.0 / 1.2) / 14.0
 
     d = cli._plan_payload(FauxPlan(), "EUR", 0.8779)
 
@@ -403,3 +410,7 @@ def test_le_payload_du_balayage_convertit_tous_les_montants():
     assert d["cost_deep"] == pytest.approx(9.6569)
     assert d["profitability_deep"] == pytest.approx(1.0909, abs=1e-4)
     assert d["fragile"] is False
+    # La voie ordre Steam : le budget se convertit, le rabais est un RAPPORT.
+    assert d["float_subi_ok"] is True
+    assert d["order_budget"] == pytest.approx(8.779)
+    assert d["order_discount"] == pytest.approx(0.2857, abs=1e-4)

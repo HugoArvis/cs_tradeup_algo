@@ -696,6 +696,11 @@ class App:
             "profitability_deep": (round(p.deep_profitability, 4)
                                    if p.deep_profitability is not None else None),
             "fragile": p.fragile,
+            "float_subi_ok": p.float_subi_compatible,
+            "order_budget": (self.conv(p.steam_order_budget())
+                             if p.steam_order_budget() is not None else None),
+            "order_discount": (round(p.steam_order_discount(), 4)
+                               if p.steam_order_discount() is not None else None),
             "exit_loss": (
                 self.conv(p.exit_loss) if p.exit_loss is not None else None
             ),
@@ -1337,6 +1342,7 @@ function carte(p, planId, archive) {
       <span>chances de gagner <b>${((p.win_probability || 0) * 100).toFixed(0)}%</b></span>
     </div>
     ${comparatif(p)}
+    ${deuxVoies(p)}
     ${bloc.join('')}
     <div class="etape">Méthode d’achat — sur ${p.buy_market || 'CSFloat'}</div>
     <p class="muted"><b>Les prix ci-dessous sont ceux de
@@ -1535,6 +1541,49 @@ function comparatif(p) {
     ${p.sell_market || 'Steam'} il passe sous le point mort. L’écart entre les
     deux marchés EST la marge — et tout achat ${p.buy_market || 'CSFloat'}
     subit le verrou de 7 jours.</div>` : ''}`;
+}
+
+// Les DEUX voies d'approvisionnement, avec leur compromis.
+//
+// CSFloat : float choisi, prix bas -- mais verrou de 7 jours, et une annonce
+// est unique donc rien n'est repetable.
+// Ordre Steam : float SUBI, prix a obtenir par rabais -- mais utilisable tout
+// de suite, et l'ordre se pose une fois puis se remplit seul.
+//
+// Ce qui tranche n'est pas le prix, c'est le float : un ordre porte sur une
+// usure, pas sur une qualite. Si les sorties changent de palier quand le float
+// est subi, la voie Steam est simplement fermee.
+function deuxVoies(p) {
+  const ok = p.float_subi_ok;
+  const rabais = p.order_discount;
+  const budget = p.order_budget;
+
+  const ligneSteam = (ok === false)
+    ? `<tr><td><b>Ordre d’achat Steam</b></td>
+        <td class="num neg">impossible</td>
+        <td>le float est subi, et les sorties changeraient de palier —
+          ce contrat exige de choisir les floats</td></tr>`
+    : (rabais === null || rabais === undefined)
+      ? `<tr><td><b>Ordre d’achat Steam</b></td><td class="num">—</td>
+          <td>prix Steam indisponible</td></tr>`
+      : `<tr><td><b>Ordre d’achat Steam</b></td>
+          <td class="num prof">${budget.toFixed(2)}</td>
+          <td>viser <b>−${Math.round(rabais * 100)} %</b> sous le prix affiché.
+            Float subi mais acceptable. <b>Répétable</b>, pas de verrou.</td></tr>`;
+
+  return `<div class="etape">Les deux voies</div>
+    <div class="scroll"><table>
+      <thead><tr><th>voie</th><th class="num">à payer pour les 10</th>
+        <th>ce que ça implique</th></tr></thead>
+      <tbody>
+        <tr><td><b>Achat direct CSFloat</b></td>
+          <td class="num prof">${p.cost.toFixed(2)}</td>
+          <td>float choisi, disponible tout de suite.
+            <b>Verrou de 7 jours</b>, et non répétable — ces annonces sont
+            uniques.</td></tr>
+        ${ligneSteam}
+      </tbody>
+    </table></div>`;
 }
 
 // --- La recherche -----------------------------------------------------------

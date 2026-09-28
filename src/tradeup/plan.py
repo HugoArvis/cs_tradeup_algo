@@ -424,6 +424,61 @@ class Plan:
         return p is not None and p < 1.0 <= self.result.profitability
 
     @property
+    def float_subi_compatible(self) -> bool | None:
+        """Les sorties gardent-elles leur palier si le float est SUBI ?
+
+        Un ordre d'achat porte sur une USURE, pas sur un float : on ne choisit
+        pas la qualite. La question decide si la voie "ordre Steam" est
+        ouverte, et elle se tranche sans aucune requete -- on repose les
+        entrees au milieu de leur palier et on regarde si les sorties bougent.
+
+        Mesure sur The Arabesque Collection : les annonces retenues avaient des
+        floats de 0,124 a 0,148, soit le HAUT du palier Minimal Wear, choisies
+        parce que les moins cheres. Un tirage au hasard donne une moyenne PLUS
+        BASSE (0,1255) et les trois sorties restent Minimal Wear. Le contrat
+        n'exige donc aucun tri.
+        """
+        if not self.options or not self.result.outcomes:
+            return None
+        from .wear import output_float, wear_of
+
+        total = 0.0
+        for o in self.options:
+            s, w = o.skin, o.wear
+            bas = max(s.min_float, w.lo)
+            haut = min(s.max_float, w.hi)
+            if haut <= bas or s.float_span <= 0:
+                return None
+            total += ((bas + haut) / 2 - s.min_float) / s.float_span
+        moyenne = total / len(self.options)
+
+        for sortie in self.result.outcomes:
+            skin = getattr(sortie, "skin", None)
+            if skin is None:
+                return None
+            if wear_of(output_float(moyenne, skin)) is not sortie.wear:
+                return False
+        return True
+
+    def steam_order_budget(self, target_roi: float = 0.20) -> float | None:
+        """Ce qu'il faut payer AU TOTAL sur Steam pour viser ce rendement.
+
+        Meme inversion que la commande `orders` : la valeur de la sortie ne
+        depend pas de ce qu'on a paye les entrees, donc le budget se deduit de
+        l'EV et le prix d'ordre suit.
+        """
+        if not self.result.ev_net:
+            return None
+        return self.result.ev_net / (1.0 + target_roi)
+
+    def steam_order_discount(self, target_roi: float = 0.20) -> float | None:
+        """Rabais a obtenir sur le prix Steam affiche pour tenir ce rendement."""
+        budget = self.steam_order_budget(target_roi)
+        if budget is None or not self.alt_cost:
+            return None
+        return 1.0 - budget / self.alt_cost
+
+    @property
     def alt_profitability(self) -> float | None:
         """Profitabilite si l'on achetait sur le marche de revente."""
         if not self.alt_cost:

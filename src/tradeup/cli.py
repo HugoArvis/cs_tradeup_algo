@@ -1409,6 +1409,13 @@ def _plan_payload(plan, devise: str, taux: float = 1.0) -> dict:
         "profitability_deep": (round(plan.deep_profitability, 4)
                                if plan.deep_profitability is not None else None),
         "fragile": plan.fragile,
+        # La voie ORDRE STEAM : repetable, float subi. Le rabais est ce qu'il
+        # faut obtenir sur le prix affiche pour tenir +20 % de rendement.
+        "float_subi_ok": plan.float_subi_compatible,
+        "order_budget": (c(plan.steam_order_budget())
+                         if plan.steam_order_budget() is not None else None),
+        "order_discount": (round(plan.steam_order_discount(), 4)
+                           if plan.steam_order_discount() is not None else None),
         "cost": c(r.cost), "net": c(r.ev_net),
         "profit": c(r.ev_profit), "roi": round(r.roi, 4),
         "profitability": round(r.profitability, 4),
