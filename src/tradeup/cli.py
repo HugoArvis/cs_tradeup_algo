@@ -1445,6 +1445,65 @@ def _plan_payload(plan, devise: str, taux: float = 1.0) -> dict:
     }
 
 
+#: Seuil mesure le 28 septembre 2026 sur The Arabesque Collection : en dessous
+#: de ce delai de remplissage, l'ordre Steam rapporte plus par jour de capital
+#: que l'achat CSFloat, verrou de 7 jours compris.
+SEUIL_JOURS_STEAM = 3.7
+
+
+def cmd_fill(args) -> int:
+    """Debit de remplissage des ordres d'achat en cours.
+
+    Le seul chiffre qui manque a l'arbitrage "CSFloat ou ordre Steam" est le
+    delai de remplissage au prix vise. Aucune donnee publique ne le donne :
+    Steam ne publie pas son carnet d'ordres. Il se mesure donc a l'usage, a
+    partir des dates d'achat enregistrees au fur et a mesure.
+    """
+    journal = Journal()
+    contrats = journal.contracts(include_done=args.all)
+    if not contrats:
+        print("Aucun contrat suivi. Depuis l'interface, bouton "
+              "'Suivre ce contrat' sur une recette.")
+        journal.close()
+        return 0
+
+    print(f"{'contrat':<14}{'collection':<30}{'achete':>9}"
+          f"{'debit/j':>10}{'reste':>9}{'verdict':>22}")
+    print("-" * 94)
+    for c in contrats:
+        s = journal.fill_stats(c.id)
+        if s is None:
+            continue
+
+        avancement = f"{s['achetes']}/{s['total']}"
+        debit = f"{s['debit_par_jour']:.1f}" if s["debit_par_jour"] else "inconnu"
+        if not s["restants"]:
+            reste, verdict = "complet", "PLEIN -- lancer"
+        elif s["jours_restants"] is None:
+            reste, verdict = "?", "trop peu d'achats"
+        else:
+            reste = f"{s['jours_restants']:.1f} j"
+            verdict = ("Steam gagne" if s["steam_gagne"]
+                       else f"lent (> {SEUIL_JOURS_STEAM} j)")
+
+        print(f"{c.id:<14}{c.collection_name[:28]:<30}{avancement:>9}"
+              f"{debit:>10}{reste:>9}{verdict:>22}")
+
+    print("-" * 94)
+    print(f"  Un ordre rempli en moins de {SEUIL_JOURS_STEAM} jours rapporte "
+          f"plus par jour de capital que")
+    print("  l'achat CSFloat, verrou de 7 jours compris. Au-dela CSFloat "
+          "reprend l'avantage --")
+    print("  sauf que son carnet s'epuise en quelques contrats, un ordre non.")
+    print()
+    print("  Le debit se calcule du PREMIER au DERNIER achat, pas depuis la "
+          "creation du")
+    print("  contrat : sinon un ordre pose tardivement paraitrait deux fois "
+          "plus lent.")
+    journal.close()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="tradeup", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1738,6 +1797,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ttl", type=float, default=24,
                    help="duree de validite du cache, en heures (defaut 24)")
     s.add_argument("--db", default=None)
+
+    s = sub.add_parser("fill",
+                       help="debit de remplissage des ordres d'achat en cours")
+    s.set_defaults(func=cmd_fill)
+    s.add_argument("--all", action="store_true",
+                   help="inclure les contrats termines")
 
     s = sub.add_parser("sweep",
                        help="balayer toute une rarete avec `plan` et journaliser "

@@ -1248,6 +1248,10 @@ const $ = s => document.querySelector(s);
 // la valeur n'est pas un candidat, et le ranger parmi des candidats invite a
 // le lire comme tel.
 
+// Le point mort, cote client. La constante Python du meme nom ne traverse
+// pas : elle sert au filtrage cote serveur, celle-ci a l'affichage.
+const SEUIL_PROFITABLE = 1.0;
+
 function profTexte(p) { return Math.round((p || 0) * 100) + '%'; }
 
 // Jauge bornee a 200 % : au-dela l'echelle ecraserait tout le reste.

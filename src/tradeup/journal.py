@@ -394,6 +394,56 @@ class Journal:
         self._conn.execute("DELETE FROM contracts WHERE id = ?", (contract_id,))
         self._conn.commit()
 
+    def fill_stats(self, contract_id: str) -> dict | None:
+        """Debit de remplissage d'un contrat, et delai projete.
+
+        Le debit se calcule du PREMIER au DERNIER achat, jamais depuis la
+        creation du contrat : un contrat suivi une semaine avant d'avoir pose
+        l'ordre donnerait un debit divise par deux, et ferait renoncer a une
+        strategie qui marche.
+
+        Deux achats sont le minimum pour un debit -- avec un seul point il n'y
+        a pas d'intervalle. On renvoie alors `rate` a None plutot que zero :
+        "inconnu" et "rien ne rentre" appellent des reactions opposees.
+        """
+        c = self.contract(contract_id)
+        if c is None:
+            return None
+
+        dates = sorted(i.purchased_at for i in c.items if i.purchased)
+        total = len(c.items)
+        achetes = len(dates)
+        restants = total - achetes
+
+        debit = None
+        if achetes >= 2:
+            ecoule = dates[-1] - dates[0]
+            if ecoule > 0:
+                # `achetes - 1` intervalles pour `achetes` points.
+                debit = (achetes - 1) / (ecoule / 86400.0)
+
+        jours_restants = None
+        if debit and restants:
+            jours_restants = restants / debit
+
+        return {
+            "contract_id": c.id,
+            "collection": c.collection_name,
+            "total": total,
+            "achetes": achetes,
+            "restants": restants,
+            "premier_achat": dates[0] if dates else None,
+            "dernier_achat": dates[-1] if dates else None,
+            "jours_ecoules": ((dates[-1] - dates[0]) / 86400.0
+                              if achetes >= 2 else None),
+            "debit_par_jour": debit,
+            "jours_restants": jours_restants,
+            # Le seuil mesure le 28 septembre 2026 : au-dela, le verrou de
+            # 7 jours de CSFloat coute moins cher que l'attente.
+            "steam_gagne": (jours_restants is not None
+                            and jours_restants < 3.7),
+        }
+
     def contract(self, contract_id: str) -> Contract | None:
         row = self._conn.execute(
             """SELECT c.*, p.collection_name, p.rarity, p.cost, p.avg_float, p.profit
