@@ -341,9 +341,28 @@ class Plan:
     # Steam rapporterait 17 a 37 % de plus.
     replis: int = 0
 
+    # Cout du MEME panier achete sur le marche de revente (Steam) au lieu du
+    # marche d'achat (CSFloat). None si un prix manque.
+    #
+    # Ce n'est pas une curiosite : un utilisateur qui verifie une entree le
+    # fait sur Steam, y trouve un prix plus eleve, et conclut a une erreur du
+    # modele. Mesure sur The Dead Hand Collection le 27 septembre -- 1,26 EUR
+    # sur CSFloat contre 1,74 sur Steam, soit 38 % d'ecart et 108 % contre
+    # 78 % de profitabilite. Les deux chiffres sont justes ; les montrer
+    # ensemble evite de croire que l'un remplace l'autre, et dit si un contrat
+    # ne tient QUE grace a l'ecart entre les deux marches.
+    alt_cost: float | None = None
+
     @property
     def valorisation_de_repli(self) -> bool:
         return self.replis > 0
+
+    @property
+    def alt_profitability(self) -> float | None:
+        """Profitabilite si l'on achetait sur le marche de revente."""
+        if not self.alt_cost:
+            return None
+        return self.result.ev_net / self.alt_cost
 
     exit_value: float | None = None  # produit net d'une revente des entrees
     liquidity: dict = field(default_factory=dict)  # nom de sortie -> stats de vente
@@ -547,7 +566,43 @@ def build_plan(
                 },
             )
 
+    if meilleur is not None and sell_source is not None:
+        from dataclasses import replace
+
+        meilleur = replace(
+            meilleur,
+            alt_cost=_cout_ailleurs(sell_source, meilleur.options, sell_to_usd),
+        )
     return meilleur
+
+
+def _cout_ailleurs(
+    source: PriceSource, options, vers_usd: float
+) -> float | None:
+    """Ce que couterait le MEME panier sur le marche de revente.
+
+    Une cotation par nom distinct, pas par exemplaire : sur Steam le prix ne
+    depend que du palier d'usure. Si un seul prix manque, on renvoie None
+    plutot qu'un total partiel -- un cout incomplet compare a un cout complet
+    donnerait un ecart inventé.
+    """
+    besoins: dict[str, int] = {}
+    for o in options:
+        besoins[o.name] = besoins.get(o.name, 0) + 1
+
+    total = 0.0
+    for nom, qte in besoins.items():
+        try:
+            q = source.fetch(nom)
+        except Exception:  # noqa: BLE001 - marche indisponible
+            return None
+        if q is None:
+            return None
+        prix = q.buy_reference()
+        if prix is None:
+            return None
+        total += qte * prix * vers_usd
+    return total
 
 
 def _valeur_de_revente(

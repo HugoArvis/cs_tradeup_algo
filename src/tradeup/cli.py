@@ -1345,8 +1345,10 @@ def cmd_sweep(args) -> int:
         # reelle sur Steam rapporterait 17 a 37 % de plus. Le taire ferait
         # passer une sous-estimation pour une mesure.
         repli = f"  [repli CSFloat x{plan.replis}]" if plan.valorisation_de_repli else ""
+        alt = (f"  [sur Steam : {plan.alt_profitability:.0%}]"
+               if plan.alt_profitability is not None else "")
         print(f"  [{prof:>5.0%}] {col.name:<40} {marque} "
-              f"({faits}/{len(cols)}){repli}", file=sys.stderr)
+              f"({faits}/{len(cols)}){alt}{repli}", file=sys.stderr)
 
     duree = (_t.time() - debut) / 60
     print()
@@ -1382,6 +1384,11 @@ def _plan_payload(plan, devise: str, taux: float = 1.0) -> dict:
         # sont deux marches.
         "buy_market": "CSFloat",
         "sell_market": "Steam",
+        # Le meme panier achete sur Steam : dit si le contrat ne tient QUE
+        # grace a l'ecart entre les deux marches.
+        "cost_alt": (c(plan.alt_cost) if plan.alt_cost is not None else None),
+        "profitability_alt": (round(plan.alt_profitability, 4)
+                              if plan.alt_profitability is not None else None),
         "cost": c(r.cost), "net": c(r.ev_net),
         "profit": c(r.ev_profit), "roi": round(r.roi, 4),
         "profitability": round(r.profitability, 4),

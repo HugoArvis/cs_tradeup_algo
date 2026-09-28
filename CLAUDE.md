@@ -467,6 +467,15 @@ Deux confusions distinctes, toutes deux constatees sur le meme contrat le
   faux — mesure sur le M4A4 | Zubastick (WW), **0,07 € sur CSFloat contre 0,11 €
   sur Steam**. Le payload porte `buy_market` et `sell_market`, et l'interface
   comme le balayage les nomment : sans cela, l'ecart se lit comme une erreur.
+`Plan.alt_cost` porte le cout du MEME panier achete sur le marche de revente,
+et l'interface affiche les deux cote a cote. Cela repond a la confusion, mais
+dit aussi quelque chose qu'aucune des deux colonnes seule ne montre : **si un
+contrat ne tient QUE grace a l'ecart entre les marches**. Dead Hand etait a
+108 % sur CSFloat et **78 % sur Steam** — l'ecart EST la marge, et il se paie
+par le verrou de 7 jours. Un prix manquant rend `alt_cost` a None plutot qu'un
+total partiel : un cout incomplet compare a un cout complet fabriquerait un
+ecart.
+
 - une annonce est **unique et publique**. Les cinq entrees annoncees a 0,06 $
   avaient disparu 15 h plus tard ; les cinq moins cheres valaient alors 0,08 /
   0,09 / 0,10 / 0,16 / **0,19** — la cinquieme au double de la premiere. Le

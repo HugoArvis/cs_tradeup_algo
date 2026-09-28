@@ -381,6 +381,8 @@ def test_le_payload_du_balayage_convertit_tous_les_montants():
         all_outcomes_profitable = True
         downgrade_profit = -1.0
         replis = 0
+        alt_cost = 14.0            # le meme panier coute plus cher sur Steam
+        alt_profitability = 12.0 / 14.0
 
     d = cli._plan_payload(FauxPlan(), "EUR", 0.8779)
 
@@ -391,3 +393,7 @@ def test_le_payload_du_balayage_convertit_tous_les_montants():
     assert d["inputs"][0]["price"] == pytest.approx(0.8779)
     # Le ROI est un RAPPORT : il ne se convertit pas.
     assert d["roi"] == pytest.approx(0.2)
+    # Le cout alternatif se convertit, sa profitabilite non.
+    assert d["cost_alt"] == pytest.approx(12.2906)
+    assert d["profitability_alt"] == pytest.approx(0.8571, abs=1e-4)
+    assert d["buy_market"] == "CSFloat" and d["sell_market"] == "Steam"

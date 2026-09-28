@@ -686,6 +686,11 @@ class App:
             ),
             "all_profitable": p.all_outcomes_profitable,
             "replis": p.replis,
+            "buy_market": "CSFloat",
+            "sell_market": "Steam",
+            "cost_alt": (self.conv(p.alt_cost) if p.alt_cost is not None else None),
+            "profitability_alt": (round(p.alt_profitability, 4)
+                                  if p.alt_profitability is not None else None),
             "exit_loss": (
                 self.conv(p.exit_loss) if p.exit_loss is not None else None
             ),
@@ -1321,11 +1326,12 @@ function carte(p, planId, archive) {
       </div>
     </div>
     <div class="chiffres">
-      <span>coût <b>${p.cost.toFixed(2)}</b></span>
+      <span>coût sur ${p.buy_market || 'CSFloat'} <b>${p.cost.toFixed(2)}</b></span>
       <span>revente nette attendue <b>${p.net.toFixed(2)}</b></span>
       <span>gain <b class="pos">+${p.profit.toFixed(2)}</b></span>
       <span>chances de gagner <b>${((p.win_probability || 0) * 100).toFixed(0)}%</b></span>
     </div>
+    ${comparatif(p)}
     ${bloc.join('')}
     <div class="etape">Méthode d’achat — sur ${p.buy_market || 'CSFloat'}</div>
     <p class="muted"><b>Les prix ci-dessous sont ceux de
@@ -1478,6 +1484,40 @@ async function ordres() {
       qui est choisi, pas la qualité. Les chances de gagner ci-dessus en
       tiennent compte.</div>
     </div>`).join('');
+}
+
+// Le MEME panier, achete sur l'autre marche. Un utilisateur qui verifie une
+// entree le fait sur Steam, y trouve plus cher, et croit a une erreur : mesure
+// sur Dead Hand, 1,26 sur CSFloat contre 1,74 sur Steam. Les deux chiffres
+// sont justes. Les montrer ensemble dit aussi si le contrat ne tient QUE grace
+// a l'ecart entre les marches -- 108 % d'un cote, 78 % de l'autre.
+function comparatif(p) {
+  if (p.cost_alt === null || p.cost_alt === undefined) {
+    return `<p class="muted">Coût sur ${p.sell_market || 'Steam'} :
+      <b>non disponible</b> — un prix manquait. Vérifier une entrée sur
+      ${p.sell_market || 'Steam'} y donnera un chiffre plus élevé sans que
+      celui-ci soit faux.</p>`;
+  }
+  const ecart = (p.cost_alt - p.cost) / p.cost;
+  const profAlt = p.profitability_alt || 0;
+  const tient = profAlt >= SEUIL_PROFITABLE;
+  return `<div class="scroll"><table>
+    <thead><tr><th>si vous achetez sur…</th><th class="num">coût des 10</th>
+      <th class="num">profitabilité</th></tr></thead>
+    <tbody>
+      <tr><td><b>${p.buy_market || 'CSFloat'}</b> (ce que la recette demande)</td>
+        <td class="num">${p.cost.toFixed(2)}</td>
+        <td class="num prof">${profTexte(p.profitability)}</td></tr>
+      <tr><td>${p.sell_market || 'Steam'}</td>
+        <td class="num">${p.cost_alt.toFixed(2)}
+          <span class="muted">(${ecart >= 0 ? '+' : ''}${Math.round(ecart * 100)} %)</span></td>
+        <td class="num ${tient ? 'prof' : 'neg'}">${profTexte(profAlt)}</td></tr>
+    </tbody></table></div>
+  ${!tient && p.profitability >= SEUIL_PROFITABLE ? `<div class="warn">
+    <b>Ce contrat ne tient que sur ${p.buy_market || 'CSFloat'}.</b> Acheté sur
+    ${p.sell_market || 'Steam'} il passe sous le point mort. L’écart entre les
+    deux marchés EST la marge — et tout achat ${p.buy_market || 'CSFloat'}
+    subit le verrou de 7 jours.</div>` : ''}`;
 }
 
 // --- La recherche -----------------------------------------------------------
