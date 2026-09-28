@@ -513,6 +513,19 @@ anciennes — et s'arrête proprement à `--max-minutes` (150 par défaut, sous 
 limite de 3 h de la tâche). La couverture se complète alors en quelques nuits
 au lieu de stagner.
 
+**Le budget doit se vérifier À L'INTÉRIEUR d'une collection**, pas seulement
+entre deux. Une seule collection peut prendre des heures : chaque cotation paie
+75 s de backoff quand un marché refuse, et certaines ont plus de **cent**
+sorties. Mesuré : **978 minutes pour un budget de 240**. `build_plan` prend donc
+un `deadline`, propagé jusqu'à `CSFloatPricer` — c'est là que le temps part
+réellement, `evaluate()` cotant les sorties une par une. Vérifié : 2 min
+demandées, 6 min tenues avec le contrôle en amont seul, **2 min** une fois
+l'échéance descendue dans le pricer.
+
+`BudgetEpuise` est distincte d'un échec : la collection n'a pas raté, elle n'a
+pas fini. Elle reste donc dans la file et le passage suivant la reprend comme
+jamais calculée.
+
 C'est le même piège que le TTL qui ne remontait pas jusqu'à la source : dans
 les deux cas le travail semble avancer, la barre de progression est normale, et
 le résultat n'arrive jamais.

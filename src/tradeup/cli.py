@@ -24,7 +24,7 @@ from .models import TRADEABLE_INPUT_RARITIES, Rarity, Wear
 from .pricing.cache import QuoteCache
 from .pricing.repository import MarketPricer
 from .pricing.steam import CURRENCIES, SteamMarket
-from .plan import build_plan
+from .plan import BudgetEpuise, build_plan
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
 from .gold import GOLD_INPUT_COUNT, scan_crates
@@ -1289,13 +1289,23 @@ def cmd_sweep(args) -> int:
         try:
             plan = build_plan(db, col, rarity, source, sell_source=steam,
                               sell_fees=FEE_MODELS["steam"],
-                              sell_to_usd=1.0 / usd_vers_devise)
+                              sell_to_usd=1.0 / usd_vers_devise,
+                              deadline=debut + limite)
         except RateLimited:
             # On NE retire PAS la collection de la file : le quota reviendra.
             print(f"  quota epuise, pause de {args.pause // 60} min "
                   f"({faits}/{len(cols)} faits)", file=sys.stderr)
             _t.sleep(args.pause)
             continue
+        except BudgetEpuise:
+            # La collection n'a pas echoue, elle n'a pas fini : on la LAISSE
+            # dans la file pour que le prochain passage la reprenne.
+            print(f"  budget de {args.max_minutes} min atteint pendant "
+                  f"{col.name} -- arret propre ({faits}/{len(cols)}).",
+                  file=sys.stderr)
+            print("  Elle sera reprise au prochain passage, comme jamais "
+                  "calculee.", file=sys.stderr)
+            break
         except Exception as exc:  # noqa: BLE001
             file.pop(0)
             echecs += 1

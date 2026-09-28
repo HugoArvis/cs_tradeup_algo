@@ -29,6 +29,28 @@ from .wear import TRADEUP_INPUT_COUNT, wear_breakpoints, wear_of
 log = logging.getLogger(__name__)
 
 
+class BudgetEpuise(Exception):
+    """Le temps imparti est ecoule au milieu d'une collection.
+
+    Distincte d'un echec : le travail n'a pas rate, il n'a pas fini. La
+    collection reste donc a faire, et le passage suivant la reprendra --
+    `Journal.last_swept` la verra comme jamais calculee.
+    """
+
+
+def _verifie_budget(deadline: float | None) -> None:
+    """Leve `BudgetEpuise` si l'echeance est passee.
+
+    Appele aux endroits ou le temps part vraiment : une cotation par objet a
+    l'entree, une evaluation par frontiere d'usure. Verifier plus finement
+    n'apporterait rien -- entre deux appels reseau il ne se passe rien.
+    """
+    import time as _t
+
+    if deadline is not None and _t.time() > deadline:
+        raise BudgetEpuise()
+
+
 class CSFloatPricer:
     """`PriceLookup` alimente par les offres reelles CSFloat.
 
@@ -45,7 +67,8 @@ class CSFloatPricer:
                  sell_source: PriceSource | None = None,
                  sell_fees: FeeModel | None = None,
                  sell_to_usd: float = 1.0,
-                 sell_basis: str = "sales"):
+                 sell_basis: str = "sales",
+                 deadline: float | None = None):
         self.source = source
         self.sell_fee = sell_fee
         self.safety_margin = safety_margin
@@ -87,6 +110,10 @@ class CSFloatPricer:
         # PRUDENT, pas exact, et l'afficher sans le dire serait mentir par
         # omission dans le bon sens.
         self.replis = 0
+        # Echeance du passage. `evaluate()` cote les sorties une par une, et
+        # une collection a plus de cent sorties : sans ce controle ICI, le
+        # budget ne pouvait pas etre tenu, quel que soit le controle en amont.
+        self.deadline = deadline
 
     def _listings(self, name: str) -> list[tuple[float, float]]:
         """Carnet nettoye, utilisable pour valoriser une sortie de trade-up.
@@ -106,6 +133,7 @@ class CSFloatPricer:
         """
         if name in self._book:
             return self._book[name]
+        _verifie_budget(self.deadline)
 
         offres = [
             o for o in self.source.listings(name, limit=self.listings_limit)
@@ -164,6 +192,7 @@ class CSFloatPricer:
         Elle porte aussi le volume : la liquidite arrive donc sans requete
         supplementaire, la ou l'interroger sur CSFloat coute un appel de plus.
         """
+        _verifie_budget(self.deadline)
         if self.revente_en_panne:
             # Ne plus interroger un marche dont on sait qu'il refuse : chaque
             # tentative coute 75 s de backoff (5+10+20+40) pour un echec
@@ -524,6 +553,7 @@ def build_plan(
     sell_fees: FeeModel | None = None,
     sell_to_usd: float = 1.0,
     sell_basis: str = "sales",
+    deadline: float | None = None,
 ) -> Plan | None:
     """Construit le meilleur panier realisable avec ce qui est en vente.
 
@@ -558,6 +588,7 @@ def build_plan(
     examinees = 0
     for skin in collection.by_rarity(rarity):
         for wear in skin.available_wears():
+            _verifie_budget(deadline)
             offres = source.listings(
                 skin.market_hash_name(wear), limit=listings_per_skin
             )
@@ -570,11 +601,13 @@ def build_plan(
 
     pricer = CSFloatPricer(source, sell_fee=sell_fee, safety_margin=safety_margin,
                            sell_source=sell_source, sell_fees=sell_fees,
-                           sell_to_usd=sell_to_usd, sell_basis=sell_basis)
+                           sell_to_usd=sell_to_usd, sell_basis=sell_basis,
+                           deadline=deadline)
     outcomes_map = {collection.id: outcomes}
 
     meilleur: Plan | None = None
     for hi in _breakpoints_avec_annonces(outcomes, pricer):
+        _verifie_budget(deadline)
         budget = (hi - max(float_margin, 1e-9)) * TRADEUP_INPUT_COUNT
         selection = cheapest_unique_selection(toutes, TRADEUP_INPUT_COUNT, budget)
         if selection is None:

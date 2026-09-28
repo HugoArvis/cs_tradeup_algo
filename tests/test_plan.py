@@ -518,3 +518,92 @@ def test_un_contrat_deja_perdant_n_est_pas_dit_fragile():
     p = _plan_factice(cout_base=1.00, cout_profond=1.40, ev=0.80)
     assert p.result.profitability < 1.0
     assert not p.fragile
+
+
+# --- Budget de temps ---------------------------------------------------------
+# Le controle ne s'exercait qu'ENTRE deux collections. Or une seule collection
+# peut prendre des heures quand un marche refuse : chaque cotation paie 75 s de
+# backoff et certaines collections ont plus de cent sorties. Un balayage a
+# tourne 978 minutes pour un budget demande de 240.
+
+
+def test_le_budget_est_respecte_pendant_la_collecte_des_annonces():
+    """L'echeance doit couper AVANT la premiere cotation si elle est passee.
+
+    Sinon la tache planifiee, que Windows tue a 3 h, serait coupee en plein
+    milieu -- donc sans rien enregistrer de la collection en cours.
+    """
+    import time
+
+    from tradeup.db import SkinDatabase
+    from tradeup.models import Rarity
+    from tradeup.plan import BudgetEpuise, build_plan
+
+    RAW = {"version": "t", "collections": [{
+        "id": "c", "name": "C", "skins": [
+            {"key": "i", "name": "Arme", "rarity": "Mil-Spec Grade",
+             "min_float": 0.0, "max_float": 1.0},
+            {"key": "o", "name": "Sortie", "rarity": "Restricted",
+             "min_float": 0.0, "max_float": 1.0}]}]}
+    db = SkinDatabase.from_dict(RAW)
+
+    class SourceQuiCompte:
+        def __init__(self):
+            self.appels = 0
+
+        def listings(self, nom, limit=30):
+            self.appels += 1
+            return []
+
+    src = SourceQuiCompte()
+    with pytest.raises(BudgetEpuise):
+        build_plan(db, db.collection("c"), Rarity.MIL_SPEC, src,
+                   deadline=time.time() - 1)
+    assert src.appels == 0, "aucune cotation ne doit partir apres l'echeance"
+
+
+def test_sans_echeance_le_comportement_est_inchange():
+    """Le budget est optionnel : `plan` en ligne de commande n'en a pas."""
+    from tradeup.plan import _verifie_budget
+
+    _verifie_budget(None)          # ne doit rien lever
+
+
+def test_une_echeance_future_ne_coupe_pas():
+    import time
+
+    from tradeup.plan import _verifie_budget
+
+    _verifie_budget(time.time() + 3600)
+
+
+def test_le_budget_coupe_aussi_la_valorisation_des_sorties():
+    """C'est LA que le temps part : une collection a plus de cent sorties.
+
+    Le controle en amont -- entre deux collections, puis dans la collecte des
+    entrees -- ne suffisait pas : `evaluate()` cote chaque sortie une par une,
+    et cette boucle-la echappait au budget.
+    """
+    import time
+
+    from tradeup.fees import STEAM
+    from tradeup.plan import BudgetEpuise, CSFloatPricer
+
+    class MarcheCompteur:
+        name = "steam"
+
+        def __init__(self):
+            self.appels = 0
+
+        def fetch(self, nom, *, use_cache=True):
+            self.appels += 1
+            from tradeup.pricing.base import Quote
+            return Quote(market_hash_name=nom, source="steam", lowest_price=1.0,
+                         median_price=1.0, volume=50, currency="EUR")
+
+    marche = MarcheCompteur()
+    p = CSFloatPricer(source=None, sell_source=marche, sell_fees=STEAM,
+                      deadline=time.time() - 1)
+    with pytest.raises(BudgetEpuise):
+        p.sell_net(SKIN, Wear.FACTORY_NEW)
+    assert marche.appels == 0, "aucune cotation apres l'echeance"
