@@ -420,6 +420,29 @@ sur ce segment : 98 et 83 ventes/jour sur Steam contre 8 et 10 sur CSFloat.
 CSFloat ne l'emporte que sur un point, décisif si l'objectif est de sortir de
 l'argent : son porte-monnaie est retirable, pas celui de Steam.
 
+**Le porte-monnaie Steam n'est pas perdu, il est décoté de 38 % à la sortie.**
+On en sort en achetant un skin sur Steam pour le revendre sur CSFloat ; ce
+passage rend **62 %**, mesuré le 28 septembre 2026 sur les trois sorties
+Arabesque (65 / 63 / 57 %). C'est l'autre face du paragraphe ci-dessus : si les
+prix bruts CSFloat sont structurellement plus bas, alors convertir du Steam en
+retirable paie cet écart.
+
+Ce taux décide des contrats, pas seulement des retraits. Un contrat rentable
+uniquement à la revente Steam ne l'est **en circuit fermé retirable** que si
+son gain dépasse 38 % — sinon il transforme de l'argent retirable en argent
+décoté. Mesuré sur l'Arabesque, 128 % annoncés : fondre puis faire sortir rend
+3,82 €, revendre les dix entrées telles quelles en rend 4,89. Le contrat est
+donc gagnant **à l'intérieur de Steam** (+1,28 € de pouvoir d'achat, de quoi
+placer les ordres suivants) et perdant si l'on veut retirer. Choisir le marché
+de revente n'est pas un réglage : c'est choisir dans quelle monnaie on
+capitalise.
+
+Corollaire, et c'est la seule application correcte de la règle du coût
+irrécupérable à un panier déjà acheté : un panier d'entrées se compare à la
+**revente de ses entrées**, jamais au prix payé. Les dix entrées Arabesque
+payées 4,84 € en revalaient 4,89 € — le contrat ne se jugeait donc pas sur
++1,33 € de profit annoncé mais sur 6,17 € contre 4,89 €.
+
 **Le TTL se decide dans la SOURCE, pas dans le cache.** `QuoteCache`
 conserve tout ; a chaque lecture `SteamMarket`/`CSFloat` lui impose son propre
 `ttl_seconds` (6 h et 3 h par defaut). Tant que `--ttl` n'arrivait qu'au cache,
