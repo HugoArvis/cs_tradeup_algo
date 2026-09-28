@@ -483,6 +483,26 @@ ecart.
   126 % a ~107 %. L'echelle des prix est **raide** en bas de gamme : prendre
   cinq exemplaires coute bien plus que cinq fois le moins cher.
 
+**Une recette est faite des annonces les MOINS cheres, donc des plus
+fragiles.** Tout autre acheteur faisant le meme calcul les prend avant vous.
+`Plan.deep_cost` recompose donc le panier en ignorant les **3** annonces les
+moins cheres de chaque objet, sous la meme contrainte de float, et sans aucun
+appel reseau — les annonces sont deja en memoire. `Plan.fragile` est vrai quand
+le contrat **basculerait** sous le point mort, ou quand le panier deviendrait
+impossible.
+
+La mesure du 28 septembre 2026 a renverse l'intuition : sur The Dead Hand
+Collection, **942 annonces exploitables et 5 points perdus seulement** a
+profondeur 4 — le carnet est profond, ce n'est pas une course. Alors que sur
+The Bank Collection en Industrial, ou il fallait du Factory New sous 0,026, il
+n'existait qu'une poignee d'annonces et le prix passait de 0,19 a 0,48 €.
+
+Le contrat ne differe pas : c'est la **profondeur du carnet au float exige** qui
+differe. C'est elle qui explique pourquoi certains contrats affichent des prix
+« impossibles » et d'autres pas, et rien ne l'affichait. Un contrat deja
+perdant n'est PAS dit fragile : la fragilite qualifie ce qui bascule, sans quoi
+le signal se noierait.
+
 **Un balayage long doit REPRENDRE, jamais recommencer.** 88 collections
 Mil-Spec en `plan` depassent largement une nuit : le quota CSFloat s'épuise, ou
 le planificateur coupe à 3 h. Si le passage suivant repart de la première

@@ -1347,6 +1347,10 @@ def cmd_sweep(args) -> int:
         repli = f"  [repli CSFloat x{plan.replis}]" if plan.valorisation_de_repli else ""
         alt = (f"  [sur Steam : {plan.alt_profitability:.0%}]"
                if plan.alt_profitability is not None else "")
+        if plan.fragile:
+            alt += "  [FRAGILE : ne tient qu'en arrivant premier]"
+        elif plan.deep_profitability is not None:
+            alt += f"  [a -3 annonces : {plan.deep_profitability:.0%}]"
         print(f"  [{prof:>5.0%}] {col.name:<40} {marque} "
               f"({faits}/{len(cols)}){alt}{repli}", file=sys.stderr)
 
@@ -1389,6 +1393,12 @@ def _plan_payload(plan, devise: str, taux: float = 1.0) -> dict:
         "cost_alt": (c(plan.alt_cost) if plan.alt_cost is not None else None),
         "profitability_alt": (round(plan.alt_profitability, 4)
                               if plan.alt_profitability is not None else None),
+        # Le meme panier si trois annonces par objet sont prises avant nous :
+        # separe une occasion d'une course.
+        "cost_deep": (c(plan.deep_cost) if plan.deep_cost is not None else None),
+        "profitability_deep": (round(plan.deep_profitability, 4)
+                               if plan.deep_profitability is not None else None),
+        "fragile": plan.fragile,
         "cost": c(r.cost), "net": c(r.ev_net),
         "profit": c(r.ev_profit), "roi": round(r.roi, 4),
         "profitability": round(r.profitability, 4),

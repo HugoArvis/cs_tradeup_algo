@@ -353,9 +353,46 @@ class Plan:
     # ne tient QUE grace a l'ecart entre les deux marches.
     alt_cost: float | None = None
 
+    # Cout du MEME panier si les `PROFONDEUR_TESTEE` annonces les moins cheres
+    # de chaque objet ont ete achetees avant vous. None si le panier devient
+    # impossible a composer.
+    #
+    # C'est la question qui separe une occasion d'une course. `plan` retient
+    # par construction les annonces les MOINS cheres : tout autre acheteur
+    # faisant le meme calcul les prend avant vous. Constate -- cinq entrees
+    # annoncees a 0,06 valaient 0,08 a 0,19 quinze heures plus tard.
+    #
+    # Mesure du 28 septembre 2026 : sur The Dead Hand Collection, 942 annonces
+    # exploitables et seulement 5 points perdus a profondeur 4 -- le carnet est
+    # profond, le contrat n'est pas une course. Sur The Bank Collection en
+    # Industrial, ou il fallait du Factory New sous 0,026, il n'existait qu'une
+    # poignee d'annonces et le prix passait de 0,19 a 0,48. Le contrat ne
+    # differe pas : c'est la PROFONDEUR au float exige qui differe, et rien ne
+    # l'affichait.
+    deep_cost: float | None = None
+
     @property
     def valorisation_de_repli(self) -> bool:
         return self.replis > 0
+
+    @property
+    def deep_profitability(self) -> float | None:
+        """Profitabilite si l'on n'arrive pas premier sur le carnet."""
+        if not self.deep_cost:
+            return None
+        return self.result.ev_net / self.deep_cost
+
+    @property
+    def fragile(self) -> bool:
+        """Le contrat repose-t-il sur le fait d'arriver premier ?
+
+        Vrai s'il passe sous le point mort des que quelques annonces sont
+        prises, ou si le panier devient carrement impossible a composer.
+        """
+        if self.deep_cost is None:
+            return True
+        p = self.deep_profitability
+        return p is not None and p < 1.0 <= self.result.profitability
 
     @property
     def alt_profitability(self) -> float | None:
@@ -566,14 +603,47 @@ def build_plan(
                 },
             )
 
-    if meilleur is not None and sell_source is not None:
+    if meilleur is not None:
         from dataclasses import replace
 
+        alt = (_cout_ailleurs(sell_source, meilleur.options, sell_to_usd)
+               if sell_source is not None else None)
         meilleur = replace(
             meilleur,
-            alt_cost=_cout_ailleurs(sell_source, meilleur.options, sell_to_usd),
+            alt_cost=alt,
+            deep_cost=_cout_en_profondeur(toutes, meilleur),
         )
     return meilleur
+
+
+#: Nombre d'annonces les moins cheres supposees prises avant nous, par objet.
+#: Trois : assez pour distinguer un carnet profond d'une course, assez peu pour
+#: rester un scenario plausible a l'echelle de quelques heures.
+PROFONDEUR_TESTEE = 3
+
+
+def _cout_en_profondeur(toutes, plan) -> float | None:
+    """Cout du meme panier sans les `PROFONDEUR_TESTEE` moins cheres par objet.
+
+    Aucun appel reseau : les annonces sont deja en memoire. On refait seulement
+    la selection, sous la MEME contrainte de float -- comparer a budget de
+    float different ne dirait rien.
+    """
+    budget = sum(o.normalized for o in plan.options)
+
+    par_nom = {}
+    for o in toutes:
+        par_nom.setdefault(o.name, []).append(o)
+
+    restantes = []
+    for lot in par_nom.values():
+        lot.sort(key=lambda o: o.unit_cost)
+        restantes.extend(lot[PROFONDEUR_TESTEE:])
+
+    selection = cheapest_unique_selection(restantes, TRADEUP_INPUT_COUNT, budget)
+    if selection is None:
+        return None
+    return sum(o.unit_cost for o in selection)
 
 
 def _cout_ailleurs(

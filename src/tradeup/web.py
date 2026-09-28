@@ -691,6 +691,11 @@ class App:
             "cost_alt": (self.conv(p.alt_cost) if p.alt_cost is not None else None),
             "profitability_alt": (round(p.alt_profitability, 4)
                                   if p.alt_profitability is not None else None),
+            "cost_deep": (self.conv(p.deep_cost)
+                          if p.deep_cost is not None else None),
+            "profitability_deep": (round(p.deep_profitability, 4)
+                                   if p.deep_profitability is not None else None),
+            "fragile": p.fragile,
             "exit_loss": (
                 self.conv(p.exit_loss) if p.exit_loss is not None else None
             ),
@@ -1508,11 +1513,23 @@ function comparatif(p) {
       <tr><td><b>${p.buy_market || 'CSFloat'}</b> (ce que la recette demande)</td>
         <td class="num">${p.cost.toFixed(2)}</td>
         <td class="num prof">${profTexte(p.profitability)}</td></tr>
+      ${p.cost_deep === null || p.cost_deep === undefined ? '' : `
+      <tr><td>${p.buy_market || 'CSFloat'}, <b>sans arriver premier</b>
+        <span class="muted">(3 annonces prises par objet)</span></td>
+        <td class="num">${p.cost_deep.toFixed(2)}</td>
+        <td class="num ${(p.profitability_deep || 0) >= SEUIL_PROFITABLE
+          ? 'prof' : 'neg'}">${profTexte(p.profitability_deep)}</td></tr>`}
       <tr><td>${p.sell_market || 'Steam'}</td>
         <td class="num">${p.cost_alt.toFixed(2)}
           <span class="muted">(${ecart >= 0 ? '+' : ''}${Math.round(ecart * 100)} %)</span></td>
         <td class="num ${tient ? 'prof' : 'neg'}">${profTexte(profAlt)}</td></tr>
     </tbody></table></div>
+  ${p.fragile ? `<div class="warn">
+    <b>Contrat FRAGILE.</b> Il ne tient qu'en arrivant premier sur le carnet :
+    dès que quelques annonces sont prises, il passe sous le point mort — ou le
+    panier ne peut plus être composé du tout. Les annonces retenues sont par
+    construction les moins chères, donc les premières achetées par quiconque
+    fait le même calcul.</div>` : ''}
   ${!tient && p.profitability >= SEUIL_PROFITABLE ? `<div class="warn">
     <b>Ce contrat ne tient que sur ${p.buy_market || 'CSFloat'}.</b> Acheté sur
     ${p.sell_market || 'Steam'} il passe sous le point mort. L’écart entre les

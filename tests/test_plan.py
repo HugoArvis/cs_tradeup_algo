@@ -459,3 +459,62 @@ def test_un_marche_en_panne_nest_plus_interroge():
 
     assert p.revente_en_panne
     assert marche.appels == 3, f"{marche.appels} appels au lieu de 3"
+
+
+# --- Profondeur du carnet ----------------------------------------------------
+# `plan` retient par construction les annonces les MOINS cheres : tout autre
+# acheteur faisant le meme calcul les prend avant nous. La question n'est donc
+# pas seulement "ce contrat est-il rentable" mais "l'est-il encore si je
+# n'arrive pas premier".
+
+
+def _plan_factice(cout_base, cout_profond, ev):
+    """Un Plan minimal, pour exercer les seules proprietes de profondeur."""
+    from tradeup.plan import Plan
+
+    class FauxResultat:
+        ev_net = ev
+        ev_profit = ev - cout_base
+        cost = cout_base
+        outcomes = ()
+
+        @property
+        def profitability(self):
+            return ev / cout_base
+
+    return Plan(result=FauxResultat(), options=(), collection=None,
+                listings_examined=0, deep_cost=cout_profond)
+
+
+def test_un_contrat_profond_reste_rentable_sans_arriver_premier():
+    """Mesure sur The Dead Hand Collection : 942 annonces exploitables, 5
+    points perdus seulement a profondeur 4."""
+    p = _plan_factice(cout_base=1.19, cout_profond=1.25, ev=1.36)
+    assert p.result.profitability == pytest.approx(1.143, abs=0.01)
+    assert p.deep_profitability == pytest.approx(1.088, abs=0.01)
+    assert not p.fragile
+
+
+def test_un_contrat_qui_ne_tient_qu_en_arrivant_premier_est_fragile():
+    """Le cas dangereux : rentable sur le papier, perdant des que quelques
+    annonces sont prises. C'est une course, pas une occasion."""
+    p = _plan_factice(cout_base=1.00, cout_profond=1.40, ev=1.10)
+    assert p.result.profitability >= 1.0
+    assert p.deep_profitability < 1.0
+    assert p.fragile
+
+
+def test_un_panier_impossible_en_profondeur_est_fragile():
+    """Si le panier ne peut meme plus etre compose, c'est le cas le plus
+    fragile -- et `None` ne doit surtout pas se lire comme "pas de probleme"."""
+    p = _plan_factice(cout_base=1.00, cout_profond=None, ev=1.50)
+    assert p.deep_profitability is None
+    assert p.fragile
+
+
+def test_un_contrat_deja_perdant_n_est_pas_dit_fragile():
+    """La fragilite qualifie ce qui BASCULE : un contrat perdant des le depart
+    est simplement perdant, et le marquer fragile noierait le signal."""
+    p = _plan_factice(cout_base=1.00, cout_profond=1.40, ev=0.80)
+    assert p.result.profitability < 1.0
+    assert not p.fragile
