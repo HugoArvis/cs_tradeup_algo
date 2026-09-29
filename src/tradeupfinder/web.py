@@ -916,6 +916,11 @@ p.muted,.warn{max-width:88ch}
 .grille{display:grid;gap:14px;align-items:start;
 grid-template-columns:repeat(auto-fill,minmax(640px,1fr))}
 .grille>.card{margin-bottom:0}
+/* La gouttiere de la grille espace les cartes ENTRE elles, pas la grille de ce
+   qui la suit. Comme les cartes y perdent leur marge, le dernier contrat suivi
+   collait au bloc d'historique juste en dessous. `:not(:empty)` evite un espace
+   fantome quand il n'y a aucun contrat a afficher. */
+.grille:not(:empty){margin-bottom:14px}
 /* Un message d'en-tete n'est pas une carte : il tient la LIGNE entiere. Sans
    cela il occupe une cellule et decale toutes les cartes d'un cran. */
 .grille>p,.grille>.plein{grid-column:1/-1;margin:0}

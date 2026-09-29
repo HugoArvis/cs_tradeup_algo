@@ -558,3 +558,20 @@ def test_les_ordres_dachat_vivent_dans_la_carte_pas_dans_un_onglet():
     # Et il n'y a plus qu'UN tableau de prix, non deux qui se recouvrent.
     assert "function voies(" in PAGE
     assert "function comparatif(" not in PAGE and "function deuxVoies(" not in PAGE
+
+
+def test_une_grille_suivie_de_contenu_garde_un_espace_en_dessous():
+    """Les cartes d'une grille perdent leur marge -- c'est la gouttiere qui les
+    espace. Mais la gouttiere n'espace pas la grille de ce qui la SUIT : sans
+    marge propre, le dernier contrat suivi colle au bloc d'historique. Rien
+    d'autre ne detecte ce genre de defaut, il ne se voit qu'a l'ecran.
+    """
+    import re
+
+    from tradeup.web import PAGE
+
+    css = re.search(r"<style>(.*?)</style>", PAGE, re.S).group(1)
+    assert re.search(r"\.grille>\.card\{[^}]*margin-bottom:0", css), \
+        "les cartes d'une grille devraient perdre leur marge"
+    assert re.search(r"\.grille[^{]*\{[^}]*margin-bottom:\s*(?!0)", css), \
+        "la grille elle-meme doit garder un espace sous elle"
