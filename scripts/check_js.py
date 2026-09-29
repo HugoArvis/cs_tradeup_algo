@@ -83,6 +83,24 @@ const __plan = {
   outcomes: [{ name: 'AUG | Lapis Lazuli (Minimal Wear)', probability: 0.3333,
                float: 0.1443, net: 6.23 }],
 };
+const __ligne = {
+  plan_id: 'abc', created_at: 1700000000, collection: 'The Arabesque Collection',
+  collection_id: 'x', profitability: 1.28, cost: 4.83, net: 6.17, profit: 1.34,
+  win_probability: 1.0, all_profitable: true,
+};
+const __contrat = {
+  id: 'c1', plan_id: 'abc', currency: 'EUR',
+  collection: 'The Arabesque Collection', rarity: 'Mil-Spec Grade',
+  created_at: 1700000000, status: 'en_cours', notes: '',
+  planned_cost: 4.83, planned_profit: 1.34, planned_avg_float: 0.13,
+  spent: 0, purchased: 0, complete: false,
+  actual_avg_float: null, float_drift: null,
+  craftable_at: null, craftable: false,
+  items: [{ id: 'i1', name: 'Sawed-Off | Lunar Wyrm (Minimal Wear)',
+            float: 0.1246, price: 0.50, url: 'https://csfloat.com/item/1',
+            purchased: false, purchased_at: null, tradable_at: null,
+            locked: false, from_plan: true }],
+};
 """
 
 #: Les appels a exercer. Chacun doit produire du HTML sans lever, et sans
@@ -116,6 +134,23 @@ const __cas = [
   ['carte, ordre Steam impossible',
    () => carte({ ...__plan, float_subi_ok: false, order_budget: null,
                  order_discount: null, order_lines: null }, 'abc', false)],
+  // Le bandeau de chiffres : lignes de /api/latest, balayage en cours, et
+  // aucun contrat -- `Math.max` d'une liste vide donne -Infinity, pas zero.
+  ['bandeau, dernier balayage',
+   () => statsCalcul([__ligne, { ...__ligne, all_profitable: false,
+                                 profitability: 1.05 }], null)],
+  ['bandeau, balayage en cours', () => statsCalcul([__ligne], 0.4)],
+  ['bandeau, aucun contrat', () => statsCalcul([], null)],
+  ['bandeau des contrats', () => statsContrats([__contrat,
+     { ...__contrat, status: 'realise' }])],
+  ['bandeau des contrats, vide', () => statsContrats([])],
+  ['contrat a acheter', () => carteContrat(__contrat)],
+  ['contrat executable',
+   () => carteContrat({ ...__contrat, purchased: 10, complete: true,
+                        craftable: true, craftable_at: 1700000000 })],
+  ['contrat avec derive de float',
+   () => carteContrat({ ...__contrat, purchased: 3, float_drift: 0.004,
+                        actual_avg_float: 0.134 })],
 ];
 
 let __ko = 0;

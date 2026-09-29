@@ -891,13 +891,109 @@ PAGE = """<!doctype html>
 <title>TradeUpFinder</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--muted:#5b6673;--line:#e2e6eb;
---pos:#0f7a3d;--neg:#b3261e;--warn:#8a5a00;--warn-bg:#fff6e0;--accent:#1a56b0;}
+--pos:#0f7a3d;--neg:#b3261e;--warn:#8a5a00;--warn-bg:#fff6e0;--accent:#1a56b0;
+--band:#edf2fa;}
 @media(prefers-color-scheme:dark){:root{--bg:#14171b;--card:#1c2126;--ink:#e8ecf1;
 --muted:#9aa5b1;--line:#2b3239;--pos:#4ec27e;--neg:#ff6b5e;--warn:#f0b400;
---warn-bg:#2e2609;--accent:#6ba5ff;}}
+--warn-bg:#2e2609;--accent:#6ba5ff;--band:#1a2230;}}
 *{box-sizing:border-box}
-body{margin:0;padding:20px 28px 60px;background:var(--bg);color:var(--ink);
+body{margin:0;background:var(--bg);color:var(--ink);
 font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+/* --- Mise en page : menu lateral + contenu --- */
+/* Les onglets passent dans une colonne fixe a gauche : ils restent visibles
+   quel que soit le defilement, et l'en-tete ne mange plus de hauteur. */
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;
+padding:22px 14px 18px;background:var(--card);border-right:1px solid var(--line)}
+.marque{display:flex;align-items:center;gap:9px;font-size:18px;font-weight:750;
+padding:0 10px 22px;letter-spacing:-.01em}
+.marque svg{width:22px;height:22px;color:var(--accent)}
+.side .tabs{flex-direction:column;gap:2px;margin:0;border:0}
+.side .tab{display:flex;align-items:center;gap:10px;padding:8px 10px;border:0;
+border-radius:8px;font-weight:550}
+.side .tab:hover{background:var(--bg);color:var(--ink)}
+.side .tab.on{background:var(--bg);color:var(--ink)}
+.tab svg{width:17px;height:17px;flex:none}
+.compte{margin-left:auto;min-width:22px;padding:0 6px;border:1px solid var(--line);
+border-radius:10px;font-size:12px;text-align:center;color:var(--muted)}
+.compte:empty{display:none}
+.side-pied{margin-top:auto;padding:14px 10px 0;border-top:1px solid var(--line);
+font-size:12px;color:var(--muted);line-height:1.7}
+.side-pied b{color:var(--ink)}
+.main{padding:0 28px 60px}
+/* Le bandeau teinte porte la barre d'outils ET les chiffres de l'onglet : ce
+   qu'on regarde en premier, avant le detail des cartes. */
+.bandeau{background:var(--band);margin:0 -28px 22px;padding:18px 28px 26px;
+border-bottom:1px solid var(--line)}
+.barre{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.barre h1{flex:1;margin:0}
+.barre label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px}
+.stats{display:grid;gap:28px;align-items:end;
+grid-template-columns:minmax(240px,1.5fr) minmax(200px,1fr) repeat(2,minmax(140px,.8fr))}
+.stats .titre{font-weight:600;margin-bottom:10px}
+.graphe{display:flex;align-items:flex-end;gap:10px;height:104px;
+border-bottom:1px solid var(--line)}
+.graphe .col-b{flex:1;max-width:26px;display:flex;flex-direction:column;
+justify-content:flex-end;height:100%;text-align:center}
+.graphe i{display:block;border-radius:3px 3px 0 0;background:var(--accent)}
+/* Hachure : le tirage peut faire perdre. Barre pleine : toutes les sorties
+   sont rentables. La difference se lit sans legende a cote de chaque barre. */
+.graphe i.hach{background:repeating-linear-gradient(135deg,var(--accent) 0 1.5px,
+transparent 1.5px 5px);border:1px solid var(--accent);border-bottom:0}
+.graphe-lab{display:flex;gap:10px;margin-top:5px}
+.graphe-lab span{flex:1;max-width:26px;font-size:11px;color:var(--muted);
+text-align:center;overflow:hidden;white-space:nowrap}
+.cadran{text-align:center}
+/* Le chiffre se pose dans le creux de l'arc, le libelle SOUS l'arc : dans le
+   creux, un libelle long touche les graduations des extremites. */
+.cadran .arc{position:relative;max-width:230px;margin:0 auto}
+.cadran svg{width:100%;display:block}
+.cadran .val{position:absolute;left:0;right:0;bottom:2px;font-size:28px;
+font-weight:600;line-height:1}
+.cadran .lab{font-size:13px;color:var(--muted);margin-top:8px}
+.stat .val{font-size:34px;font-weight:600;letter-spacing:-.02em;line-height:1.1;
+font-variant-numeric:tabular-nums}
+.stat .lab{display:flex;align-items:flex-end;gap:18px;
+margin-top:26px;font-size:13px;color:var(--muted)}
+.stat a{color:var(--ink);text-decoration:none;font-size:18px}
+.vide{color:var(--muted);font-size:13px;align-self:center}
+/* --- Colonnes de suivi des contrats --- */
+.kanban{display:grid;gap:18px;align-items:start;margin-bottom:22px;
+grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.kanban>.card{grid-column:1/-1}
+.colonne{display:flex;flex-direction:column;gap:12px;min-width:0}
+.colonne-tete{display:flex;justify-content:space-between;align-items:center}
+.colonne-tete h2{font-size:19px;font-weight:600;margin:0}
+.nb{padding:1px 9px;border:1px solid var(--line);border-radius:6px;font-size:13px;
+background:var(--card)}
+.mini{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:14px 16px}
+.mini h3{font-size:15px;margin:0 0 6px}
+.mini .muted{font-size:13px}
+.mini details{margin-top:10px}
+/* La carte foncee de la maquette : reservee au contrat qui demande d'AGIR. */
+.mini.fort{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.mini.fort .muted,.mini.fort th{color:var(--card);opacity:.72}
+.mini.fort summary{color:var(--card)}
+.mini.fort .puce{border-color:rgba(127,127,127,.45)}
+.colonne-vide{border:1px dashed var(--line);border-radius:12px;padding:14px 16px;
+color:var(--muted);font-size:13px}
+.puces{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.puce{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;font-size:12px;
+border:1px solid var(--line);border-radius:6px;white-space:nowrap}
+.puce svg{width:13px;height:13px}
+@media(max-width:860px){
+.app{grid-template-columns:1fr}
+.side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;
+align-items:center;gap:8px;padding:12px 16px;border-right:0;
+border-bottom:1px solid var(--line)}
+.marque{padding:0 10px 0 0}
+.side .tabs{flex-direction:row;flex-wrap:wrap}
+.side-pied{display:none}
+.main{padding:0 16px 40px}
+.bandeau{margin:0 -16px 18px;padding:16px}
+.stats{grid-template-columns:1fr 1fr}
+}
 /* Pleine largeur. Les TABLEAUX gagnent a s'etaler -- c'est la que la place
    sert. La PROSE non : une ligne de 2000 px ne se lit plus, l'oeil perd le
    debut de la ligne suivante. D'ou la mesure limitee sur les paragraphes
@@ -926,8 +1022,8 @@ grid-template-columns:repeat(auto-fill,minmax(640px,1fr))}
 .grille>p,.grille>.plein{grid-column:1/-1;margin:0}
 h1{font-size:22px;margin:0 0 4px}
 .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
-padding:16px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:18px;margin-bottom:14px}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
 select,input{padding:7px 10px;border:1px solid var(--line);border-radius:7px;
 background:var(--card);color:var(--ink);font:inherit}
@@ -947,16 +1043,6 @@ td.num,th.num{text-align:right}
 tr.pick{cursor:pointer}
 tr.pick:hover{background:var(--warn-bg)}
 tr.sel{outline:2px solid var(--accent);outline-offset:-2px}
-/* Titre a gauche, onglets a droite, sur la meme ligne : la largeur disponible
-   sert a economiser de la HAUTEUR, ce qui remonte les contrats dans l'ecran.
-   En dessous de 760 px les deux repassent l'un sous l'autre. */
-.entete{display:flex;justify-content:space-between;align-items:flex-end;
-gap:20px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
-.entete .sub{margin-bottom:10px}
-.entete .tabs{margin:0;border:0}
-/* Le soulignement de l'onglet actif doit tomber SUR le filet de l'en-tete,
-   sinon il flotte un pixel au-dessus. */
-.entete .tab{margin-bottom:-1px}
 .tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--line)}
 .tab{padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;
 color:var(--muted);font-weight:600}
@@ -1022,29 +1108,44 @@ summary{cursor:pointer;color:var(--accent);font-size:13px}
 border-top-color:var(--accent);border-radius:50%;animation:s .8s linear infinite;
 vertical-align:-2px;margin-right:7px}
 @keyframes s{to{transform:rotate(360deg)}}
-</style></head><body><div id="banniere"></div><div class="wrap">
+</style></head><body><div id="banniere"></div><div class="app">
 
-<div class="entete">
-  <div>
-    <h1>TradeUpFinder</h1>
-    <div class="sub">Application locale &middot; montants en
-      <b id="devise">…</b> <span id="devise-note"></span>
-      &middot; serveur démarré <b id="demarrage">…</b></div>
+<aside class="side">
+  <div class="marque">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6 4 4 6-8"/>
+      <path d="M15 7h5v5"/></svg>
+    TradeUpFinder
   </div>
-  <div class="tabs">
-    <div class="tab on" data-pane="calcul">Calculer</div>
-    <div class="tab" data-pane="inventaire">Mon inventaire</div>
-    <div class="tab" data-pane="contrats">Mes contrats</div>
-  </div>
-</div>
+  <nav class="tabs">
+    <div class="tab on" data-pane="calcul">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/>
+        <path d="M7 15l4-4 3 3 5-6"/></svg>
+      Calculer <span class="compte" id="nb-calcul"></span></div>
+    <div class="tab" data-pane="inventaire">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18"
+        height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      Mon inventaire</div>
+    <div class="tab" data-pane="contrats">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5"
+        height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/>
+        <rect x="17" y="4" width="4" height="7" rx="1.5"/></svg>
+      Mes contrats <span class="compte" id="nb-contrats"></span></div>
+  </nav>
+  <div class="side-pied">Application locale<br>
+    montants en <b id="devise">…</b> <span id="devise-note"></span><br>
+    serveur démarré <b id="demarrage">…</b></div>
+</aside>
+
+<main class="main">
 
 <div class="pane on" id="pane-calcul">
-  <div class="card">
-    <p class="muted">Le modèle cote chaque collection de la rareté choisie et
-    ne garde que les contrats <b>rentables</b> : ceux dont la revente attendue
-    dépasse ce que les dix entrées coûtent. Les autres ne sont pas affichés —
-    il n’y a rien à en faire.</p>
-    <div class="row">
+  <section class="bandeau">
+    <div class="barre">
+      <h1>Contrats rentables</h1>
       <label>Rareté d’entrée
         <select id="rarity">
           <option value="consumer">Consumer</option>
@@ -1056,21 +1157,21 @@ vertical-align:-2px;margin-right:7px}
       </label>
       <button id="chercher">Relancer maintenant (plus d’1 h)</button>
     </div>
-    <p class="muted" id="cout-balayage">…</p>
-  </div>
+    <div class="stats" id="stats-calcul"></div>
+  </section>
+  <p class="muted">Le modèle cote chaque collection de la rareté choisie et
+  ne garde que les contrats <b>rentables</b> : ceux dont la revente attendue
+  dépasse ce que les dix entrées coûtent. Les autres ne sont pas affichés —
+  il n’y a rien à en faire. <span id="cout-balayage">…</span></p>
   <div id="avancement"></div>
   <div id="resultats" class="grille"></div>
 </div>
 
 <div class="pane" id="pane-inventaire">
-  <div class="card">
-    <p class="muted">Contrats realisables avec les skins que vous possedez deja.
-    Les entrees sont valorisees a ce qu'elles rapporteraient <b>revendues</b> :
-    fondre un skin, c'est renoncer a le vendre. Le prix que vous l'avez paye
-    n'entre pas dans le calcul &mdash; il est deja depense quoi que vous
-    decidiez.</p>
-    <div class="row">
-      <label>Rarete d'entree
+  <section class="bandeau">
+    <div class="barre" style="margin-bottom:0">
+      <h1>Mon inventaire</h1>
+      <label>Rareté d’entrée
         <select id="inv-rarity">
           <option value="consumer">Consumer</option>
           <option value="industrial">Industrial</option>
@@ -1089,8 +1190,16 @@ vertical-align:-2px;margin-right:7px}
       </label>
       <button class="ghost sm" id="inv-relire">Relire l'inventaire</button>
     </div>
+  </section>
+  <div class="card">
+    <p class="muted">Contrats realisables avec les skins que vous possedez deja.
+    Les entrees sont valorisees a ce qu'elles rapporteraient <b>revendues</b> :
+    fondre un skin, c'est renoncer a le vendre. Le prix que vous l'avez paye
+    n'entre pas dans le calcul &mdash; il est deja depense quoi que vous
+    decidiez.</p>
     <div id="inv-bilan" class="muted">chargement&hellip;</div>
-    <div class="row" style="border-top:1px solid var(--line);padding-top:12px">
+    <div class="row" style="border-top:1px solid var(--line);padding-top:12px;
+      margin:12px 0 0">
       <button id="inv-calculer" disabled>Calculer</button>
       <span class="muted" id="inv-cout"></span>
     </div>
@@ -1099,14 +1208,15 @@ vertical-align:-2px;margin-right:7px}
 </div>
 
 <div class="pane" id="pane-contrats">
-  <div class="card">
-    <div class="row">
-      <label><input type="checkbox" id="tous"> afficher aussi les contrats
-        termines</label>
-      <button class="ghost sm" id="rafraichir">Rafraichir</button>
+  <section class="bandeau">
+    <div class="barre">
+      <h1>Mes contrats</h1>
+      <label><input type="checkbox" id="tous"> afficher aussi les terminés</label>
+      <button class="ghost sm" id="rafraichir">Rafraîchir</button>
     </div>
-  </div>
-  <div id="contrats" class="grille"></div>
+    <div class="stats" id="stats-contrats"></div>
+  </section>
+  <div id="contrats" class="kanban"></div>
   <div class="card">
     <div class="etape">Plans calcules</div>
     <p class="muted">Tout plan calcule est conserve : il a coute des requetes.
@@ -1120,6 +1230,8 @@ vertical-align:-2px;margin-right:7px}
     </table></div>
   </div>
 </div>
+
+</main>
 </div>
 
 <script>
@@ -1141,6 +1253,105 @@ function profTexte(p) { return Math.round((p || 0) * 100) + '%'; }
 function jauge(p) {
   const pct = Math.min(100, ((p || 0) / 2) * 100);
   return '<div class="jauge"><i style="width:' + pct + '%"></i></div>';
+}
+
+// --- Bandeau de chiffres ----------------------------------------------------
+// Un histogramme, un cadran, deux grands chiffres : ce qu'on lit avant d'entrer
+// dans le detail des cartes. Chaque zone se rend a part, avec des donnees deja
+// en memoire -- le bandeau ne coute aucune requete.
+
+function nomCourt(nom) {
+  return String(nom || '').replace(/^The /, '').replace(/ Collection$/, '');
+}
+
+// `barres` : [{valeur (0 a 1), plein, lab, titre}].
+function graphe(titre, barres) {
+  if (!barres.length) {
+    return `<div><div class="titre">${titre}</div>
+      <div class="vide">rien à afficher pour l’instant</div></div>`;
+  }
+  const hauteur = v => Math.max(4, Math.round(Math.min(1, v) * 100));
+  return `<div><div class="titre">${titre}</div>
+    <div class="graphe">${barres.map(b => `<div class="col-b" title="${b.titre}">
+      <i class="${b.plein ? '' : 'hach'}" style="height:${hauteur(b.valeur)}%"></i>
+      </div>`).join('')}</div>
+    <div class="graphe-lab">${barres.map(b =>
+      `<span>${b.lab}</span>`).join('')}</div></div>`;
+}
+
+// Demi-cercle de graduations, `part` entre 0 et 1.
+function cadran(part, valeur, lab) {
+  const n = 40;
+  const actifs = Math.round(Math.min(1, Math.max(0, part || 0)) * n);
+  let traits = '';
+  for (let i = 0; i < n; i++) {
+    const a = Math.PI - i * Math.PI / (n - 1);
+    const c = Math.cos(a), s = Math.sin(a);
+    traits += `<line x1="${(100 + 74 * c).toFixed(1)}" y1="${(100 - 74 * s).toFixed(1)}"
+      x2="${(100 + 94 * c).toFixed(1)}" y2="${(100 - 94 * s).toFixed(1)}"
+      style="stroke:var(${i < actifs ? '--accent' : '--line'})"
+      stroke-width="2.4" stroke-linecap="round"/>`;
+  }
+  return `<div class="cadran"><div class="arc">
+    <svg viewBox="0 0 200 104">${traits}</svg><div class="val">${valeur}</div>
+    </div><div class="lab">${lab}</div></div>`;
+}
+
+function chiffre(valeur, lab, cible) {
+  return `<div class="stat"><div class="val">${valeur}</div>
+    <div class="lab"><span>${lab}</span>${cible
+      ? `<a href="${cible}" title="voir le détail">→</a>` : ''}</div></div>`;
+}
+
+// `plans` : lignes de /api/latest ou d'un balayage, qui portent les memes
+// champs et arrivent deja triees par profitabilite decroissante.
+// `avancement` n'est renseigne que pendant un balayage : le cadran montre
+// alors la progression plutot que le meilleur contrat.
+function statsCalcul(plans, avancement) {
+  const top = plans.slice(0, 10);
+  const max = Math.max(1.5, ...top.map(p => p.profitability || 0));
+  const barres = top.map(p => ({
+    valeur: ((p.profitability || 0) - 1) / (max - 1),
+    plein: !!p.all_profitable,
+    lab: nomCourt(p.collection).slice(0, 4),
+    titre: nomCourt(p.collection) + ' : ' + profTexte(p.profitability) +
+      (p.all_profitable ? ', toutes les sorties rentables'
+        : ', le tirage peut faire perdre'),
+  }));
+  const meilleur = plans[0];
+  const enCours = avancement !== null && avancement !== undefined;
+  const cad = enCours
+    ? cadran(avancement, Math.round(avancement * 100) + '%', 'balayage en cours')
+    : meilleur
+      ? cadran(meilleur.win_probability,
+          Math.round((meilleur.win_probability || 0) * 100) + '%',
+          'chances de gagner, meilleur contrat')
+      : cadran(0, '—', 'aucun contrat rentable');
+  const gain = plans.length ? Math.max(...plans.map(p => p.profit || 0)) : null;
+  return graphe('Profitabilité au-dessus du point mort', barres) + cad +
+    chiffre(plans.length, 'contrats<br>rentables', '#resultats') +
+    chiffre(gain === null ? '—' : '+' + gain.toFixed(2),
+      'meilleur gain<br>par contrat', null);
+}
+
+function statsContrats(l) {
+  const actifs = l.filter(c => colonneDe(c) !== 'fini');
+  const barres = actifs.slice(0, 10).map(c => ({
+    valeur: c.purchased / 10,
+    plein: c.purchased >= 10,
+    lab: nomCourt(c.collection).slice(0, 4),
+    titre: nomCourt(c.collection) + ' : ' + c.purchased + '/10 achetés',
+  }));
+  const achetes = actifs.reduce((n, c) => n + c.purchased, 0);
+  const part = actifs.length ? achetes / (actifs.length * 10) : 0;
+  const depense = actifs.reduce((s, c) => s + c.spent, 0);
+  const prevu = actifs.reduce((s, c) => s + c.planned_cost, 0);
+  const prets = actifs.filter(c => c.craftable).length;
+  return graphe('Entrées achetées par contrat', barres) +
+    cadran(part, Math.round(part * 100) + '%', 'des entrées achetées') +
+    chiffre(prets, 'exécutables<br>maintenant', '#contrats') +
+    chiffre(depense.toFixed(2), 'dépensés sur ' + prevu.toFixed(2) +
+      '<br>prévus', null);
 }
 
 function banniere(texte, erreur) {
@@ -1400,6 +1611,8 @@ async function dernierBalayage() {
   const d = await fetch('/api/latest?rarity=' + r).then(x => x.json());
   if (d.error) return;
   const plans = d.plans || [];
+  $('#stats-calcul').innerHTML = statsCalcul(plans, null);
+  $('#nb-calcul').textContent = plans.length || '';
 
   if (!plans.length) {
     $('#avancement').innerHTML = `<div class="card">
@@ -1484,6 +1697,8 @@ async function suivreBatch(id) {
 async function dessinerBatch(b) {
   const pct = Math.round(b.progress * 100);
   const fini = b.state === 'finished' || b.state === 'stopped';
+  $('#stats-calcul').innerHTML = statsCalcul(b.results, fini ? null : b.progress);
+  $('#nb-calcul').textContent = b.results.length || '';
 
   $('#avancement').innerHTML = `<div class="card">
     <div class="row" style="justify-content:space-between;margin:0">
@@ -1580,68 +1795,112 @@ async function histo() {
     : '<tr><td colspan="7" class="muted">aucun plan calcule pour le moment</td></tr>';
 }
 
+// --- Contrats suivis, en colonnes -------------------------------------------
+// Un contrat avance de gauche a droite : on achete, on attend la fin du verrou
+// de 7 jours, on execute. La colonne dit ou il en est sans lire la carte.
+
+const COLONNES = [
+  ['afaire', 'À acheter'], ['achat', 'Achats en cours'],
+  ['verrou', 'Verrou 7 jours'], ['pret', 'Exécutables'], ['fini', 'Terminés'],
+];
+
+function colonneDe(c) {
+  if (c.status === 'realise' || c.status === 'abandonne') return 'fini';
+  if (c.craftable) return 'pret';
+  if (c.complete) return 'verrou';
+  return c.purchased > 0 ? 'achat' : 'afaire';
+}
+
+const ICONE_DATE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/>' +
+  '<path d="M3 10h18M8 3v4M16 3v4"/></svg>';
+const ICONE_PANIER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2"><path d="M3 4h2l2.5 11h11L21 8H6.5"/>' +
+  '<circle cx="9" cy="19" r="1.5"/><circle cx="18" cy="19" r="1.5"/></svg>';
+
 async function contrats() {
-  const tous = $('#tous').checked ? '?all=1' : '';
-  const d = await fetch('/api/contracts' + tous).then(x => x.json());
+  const tous = $('#tous').checked;
+  const d = await fetch('/api/contracts' + (tous ? '?all=1' : ''))
+    .then(x => x.json());
   const l = d.contracts || [];
+  $('#stats-contrats').innerHTML = statsContrats(l);
+  $('#nb-contrats').textContent = l.filter(c => colonneDe(c) !== 'fini').length || '';
   if (!l.length) {
     $('#contrats').innerHTML = '<div class="card muted">Aucun contrat suivi. ' +
-      'Cliquez Suivre sur un plan calcule, plus bas.</div>';
+      'Cliquez Suivre sur un plan calculé, plus bas.</div>';
     return;
   }
-  $('#contrats').innerHTML = l.map(c => {
-    const pct = Math.round(c.purchased / 10 * 100);
-    let etat;
-    if (c.craftable) {
-      etat = '<span class="tag" style="background:#0f7a3d;color:#fff">executable maintenant</span>';
-    } else if (c.craftable_at) {
-      etat = '<span class="tag">executable le ' + dt(c.craftable_at) + '</span>';
-    } else {
-      etat = '<span class="tag">' + c.purchased + '/10 achetes</span>';
-    }
-
-    let derive = '';
-    if (c.float_drift !== null) {
-      const gros = Math.abs(c.float_drift) > 0.003;
-      derive = '<div class="' + (gros ? 'warn' : 'muted') + '">Float moyen reel : <b>' +
-        c.actual_avg_float.toFixed(4) + '</b> (prevu ' + c.planned_avg_float.toFixed(4) +
-        ', ecart ' + (c.float_drift >= 0 ? '+' : '') + c.float_drift.toFixed(4) + ')' +
-        (gros ? ' &mdash; verifiez que la sortie n&rsquo;a pas change de palier.' : '') +
-        '</div>';
-    }
-
-    const lignes = c.items.map(i => {
-      const verrou = i.purchased
-        ? (i.locked ? 'jusqu&rsquo;au ' + dt(i.tradable_at) : 'libre')
-        : '<span class="muted">non achete</span>';
-      const actions = i.purchased
-        ? '<button class="ghost sm" data-item="' + i.id + '" data-act="annuler">Annuler</button>'
-        : (i.url ? '<a class="buy" href="' + i.url + '" target="_blank">Acheter</a> ' : '') +
-          '<button class="sm" data-item="' + i.id + '" data-act="acheter">Achete</button>';
-      return '<tr class="' + (i.purchased ? 'done' : '') + '"><td>' + i.name +
-        (i.from_plan ? '' : ' <span class="tag">substitut</span>') +
-        '</td><td class="num">' + i.float.toFixed(4) +
-        '</td><td class="num">' + i.price.toFixed(2) +
-        '</td><td>' + verrou + '</td><td>' + actions + '</td></tr>';
+  $('#contrats').innerHTML = COLONNES
+    .filter(([cle]) => cle !== 'fini' || tous)
+    .map(([cle, titre]) => {
+      const ici = l.filter(c => colonneDe(c) === cle);
+      return `<div class="colonne">
+        <div class="colonne-tete"><h2>${titre}</h2>
+          <span class="nb">${ici.length}</span></div>
+        ${ici.length ? ici.map(carteContrat).join('')
+          : '<div class="colonne-vide">aucun contrat</div>'}</div>`;
     }).join('');
+}
 
-    return '<div class="card"><div class="row" style="justify-content:space-between">' +
-      '<b>' + c.collection + '</b> ' +
-      (c.rarity ? '<span class="tag">' + c.rarity + '</span> ' : '') +
-      etat + '</div>' +
-      '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
-      '<p class="muted">Depense ' + c.spent.toFixed(2) + ' / prevu ' +
-      c.planned_cost.toFixed(2) + ' &middot; cree le ' + dt(c.created_at) +
-      ' &middot; statut : ' + c.status + '</p>' + derive +
-      '<div class="scroll"><table><thead><tr><th>Objet</th><th class="num">Float</th>' +
-      '<th class="num">Prix</th><th>Verrou</th><th></th></tr></thead><tbody>' +
-      lignes + '</tbody></table></div>' +
-      '<div class="row" style="margin-top:10px">' +
-      '<button class="ghost sm" data-ct="' + c.id + '" data-status="realise">Marquer realise</button>' +
-      '<button class="ghost sm" data-ct="' + c.id + '" data-status="abandonne">Abandonner</button>' +
-      '<button class="ghost sm" data-ct="' + c.id + '" data-del="1">Supprimer</button>' +
-      '</div></div>';
+function carteContrat(c) {
+  const col = colonneDe(c);
+  let quand;
+  if (col === 'fini') {
+    quand = c.status === 'realise' ? 'réalisé' : 'abandonné';
+  } else if (c.craftable) {
+    quand = 'exécutable maintenant';
+  } else if (c.craftable_at) {
+    quand = 'exécutable le ' + dt(c.craftable_at);
+  } else {
+    quand = 'créé le ' + dt(c.created_at);
+  }
+
+  let derive = '';
+  if (c.float_drift !== null && c.float_drift !== undefined) {
+    const gros = Math.abs(c.float_drift) > 0.003;
+    derive = '<div class="' + (gros ? 'warn' : 'muted') + '">Float moyen reel : <b>' +
+      c.actual_avg_float.toFixed(4) + '</b> (prevu ' + c.planned_avg_float.toFixed(4) +
+      ', ecart ' + (c.float_drift >= 0 ? '+' : '') + c.float_drift.toFixed(4) + ')' +
+      (gros ? ' &mdash; verifiez que la sortie n&rsquo;a pas change de palier.' : '') +
+      '</div>';
+  }
+
+  const lignes = c.items.map(i => {
+    const verrou = i.purchased
+      ? (i.locked ? 'jusqu&rsquo;au ' + dt(i.tradable_at) : 'libre')
+      : '<span class="muted">non achete</span>';
+    const actions = i.purchased
+      ? '<button class="ghost sm" data-item="' + i.id + '" data-act="annuler">Annuler</button>'
+      : (i.url ? '<a class="buy" href="' + i.url + '" target="_blank">Acheter</a> ' : '') +
+        '<button class="sm" data-item="' + i.id + '" data-act="acheter">Achete</button>';
+    return '<tr class="' + (i.purchased ? 'done' : '') + '"><td>' + i.name +
+      (i.from_plan ? '' : ' <span class="tag">substitut</span>') +
+      '</td><td class="num">' + i.float.toFixed(4) +
+      '</td><td class="num">' + i.price.toFixed(2) +
+      '</td><td>' + verrou + '</td><td>' + actions + '</td></tr>';
   }).join('');
+
+  const gain = c.planned_profit || 0;
+  return `<div class="mini${col === 'pret' ? ' fort' : ''}">
+    <h3>${c.collection}</h3>
+    <div class="muted">${c.rarity ? c.rarity + ' · ' : ''}dépensé
+      ${c.spent.toFixed(2)} sur ${c.planned_cost.toFixed(2)} prévus · gain prévu
+      ${gain >= 0 ? '+' : ''}${gain.toFixed(2)}</div>
+    ${derive}
+    <div class="puces">
+      <span class="puce">${ICONE_DATE}${quand}</span>
+      <span class="puce" title="entrées achetées">${ICONE_PANIER}${c.purchased}/10</span>
+    </div>
+    <details><summary>Les objets et les actions</summary>
+      <div class="scroll"><table><thead><tr><th>Objet</th>
+        <th class="num">Float</th><th class="num">Prix</th><th>Verrou</th><th></th>
+        </tr></thead><tbody>${lignes}</tbody></table></div>
+      <div class="row" style="margin:10px 0 0">
+        <button class="ghost sm" data-ct="${c.id}" data-status="realise">Marquer réalisé</button>
+        <button class="ghost sm" data-ct="${c.id}" data-status="abandonne">Abandonner</button>
+        <button class="ghost sm" data-ct="${c.id}" data-del="1">Supprimer</button>
+      </div>
+    </details></div>`;
 }
 
 document.addEventListener('click', async e => {
@@ -1861,6 +2120,9 @@ $('#rarity').addEventListener('change', () => {
 });
 charger();
 dernierBalayage();
+// Lecture locale du journal, sans requete CSFloat : elle remplit le compteur
+// du menu avant meme qu'on ouvre l'onglet.
+contrats();
 </script></body></html>
 """
 
