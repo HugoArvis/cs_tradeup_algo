@@ -24,6 +24,31 @@ fait, comment, et ce qui a été vérifié.
 Si le serveur MCP ClickUp est injoignable, le dire et demander quoi faire — ne
 jamais sauter la vérification en silence.
 
+## Flux de travail
+
+Trois branches, trois rôles : `main` porte la version du projet, `dev` intègre
+ce qui est relu, et **chaque feature a sa propre branche**. Ne jamais commiter
+directement sur `main` ni sur `dev` — vérifier la branche courante avant le
+premier commit, pas après.
+
+Une feature terminée se pousse (`git push -u origin <branche>`) puis s'ouvre en
+**pull request avec `dev` pour base**. La relecture est faite par une **autre
+instance de Claude**, précisément pour qu'elle ne soit pas biaisée par le
+travail relu : `/code-review ultra <PR#>`. C'est une commande déclenchée par
+l'utilisateur et facturée — l'instance auteure ne peut pas la lancer elle-même,
+elle donne le numéro de PR et s'arrête là. Le merge est accepté par
+l'utilisateur.
+
+Ce détour n'est pas une formalité : les bugs les plus coûteux du projet
+— devises mélangées dans le balayage, `median_price` retenu sur un volume de 1,
+`SEUIL_PROFITABLE` disparu du JavaScript — ont tous été attrapés par
+l'utilisateur en lisant un résultat, jamais par l'instance qui venait de les
+écrire.
+
+`gh` n'est pas installé sur la machine de développement. À défaut, l'URL
+`https://github.com/HugoArvis/cs_tradeup_algo/compare/dev...<branche>?expand=1`
+ouvre la pull request avec la bonne base.
+
 ## Commandes
 
 ```bash
