@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.ev import InputItem, Outcome, TradeUpResult
-from tradeup.models import Rarity, Skin, Wear
-from tradeup.simulate import contracts_for_significance, sanity_check, simulate_series
+from tradeupfinder.ev import InputItem, Outcome, TradeUpResult
+from tradeupfinder.models import Rarity, Skin, Wear
+from tradeupfinder.simulate import contracts_for_significance, sanity_check, simulate_series
 
 
 def make_skin(key, lo=0.0, hi=1.0):

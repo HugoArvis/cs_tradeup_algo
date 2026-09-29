@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from tradeup.journal import Journal
+from tradeupfinder.journal import Journal
 
 JOUR = 86400.0
 

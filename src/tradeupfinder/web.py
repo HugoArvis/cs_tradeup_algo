@@ -1,6 +1,6 @@
 """Application web locale : choisir une collection et lancer un plan sans commande.
 
-    python -m tradeup.web
+    python -m tradeupfinder.web
 
 Trois contraintes ont dicte la conception :
 
@@ -1035,7 +1035,7 @@ def serve(*, host: str = "127.0.0.1", port: int = 8765, rate: int = 10,
 PAGE = """<!doctype html>
 <html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Trade-up CS2</title>
+<title>TradeUpFinder</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--muted:#5b6673;--line:#e2e6eb;
 --pos:#0f7a3d;--neg:#b3261e;--warn:#8a5a00;--warn-bg:#fff6e0;--accent:#1a56b0;}
@@ -1118,7 +1118,7 @@ vertical-align:-2px;margin-right:7px}
 @keyframes s{to{transform:rotate(360deg)}}
 </style></head><body><div id="banniere"></div><div class="wrap">
 
-<h1>Assistant trade-up CS2</h1>
+<h1>TradeUpFinder</h1>
 <div class="sub">Application locale &middot; montants en
   <b id="devise">…</b> <span id="devise-note"></span>
   &middot; serveur démarré <b id="demarrage">…</b></div>
@@ -1665,7 +1665,7 @@ async function dessinerBatch(b) {
 
   if (!b.results.length) {
     $('#resultats').innerHTML = fini
-      ? `<div class="card"><b>Aucun tradeup rentable dans cette rareté.</b>
+      ? `<div class="card"><b>Aucun trade-up rentable dans cette rareté.</b>
          <p class="muted">${b.computed} collections cotées, aucune ne rend plus
          qu’elle ne coûte aux prix du moment. Ce n’est pas une panne, c’est le
          résultat. Essayez une autre rareté, ou relancez plus tard — les prix
@@ -2035,7 +2035,7 @@ dernierBalayage();
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    p = argparse.ArgumentParser(prog="tradeup.web", description=__doc__)
+    p = argparse.ArgumentParser(prog="tradeupfinder.web", description=__doc__)
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--rate", type=int, default=10,
                    help="requetes CSFloat par minute")

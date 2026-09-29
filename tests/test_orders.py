@@ -12,16 +12,16 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.db import SkinDatabase
-from tradeup.models import Rarity
-from tradeup.orders import (
+from tradeupfinder.db import SkinDatabase
+from tradeupfinder.models import Rarity
+from tradeupfinder.orders import (
     DEFAULT_MAX_DISCOUNT,
     STEAM_MIN_PRICE,
     fill_estimate,
     plan_orders,
     scan_orders,
 )
-from tradeup.pricing.repository import StaticPricer
+from tradeupfinder.pricing.repository import StaticPricer
 
 
 @pytest.fixture(scope="module")
@@ -193,7 +193,7 @@ def test_le_float_est_traite_comme_un_tirage(db, bank):
     Le mode aleatoire impose le milieu du palier ; un plan calcule en mode fixe
     viserait bien plus bas.
     """
-    from tradeup.generator import Recipe, optimize_recipe
+    from tradeupfinder.generator import Recipe, optimize_recipe
 
     p = pricer(bank)
     plan = plan_orders(db, bank, Rarity.INDUSTRIAL, p)
@@ -220,9 +220,9 @@ def test_lage_des_cotations_est_mesurable(tmp_path):
     un mot et donne un scan d'apparence normale, entierement faux."""
     import time
 
-    from tradeup.pricing.base import Quote
-    from tradeup.pricing.cache import QuoteCache
-    from tradeup.pricing.repository import MarketPricer
+    from tradeupfinder.pricing.base import Quote
+    from tradeupfinder.pricing.cache import QuoteCache
+    from tradeupfinder.pricing.repository import MarketPricer
 
     maintenant = time.time()
 

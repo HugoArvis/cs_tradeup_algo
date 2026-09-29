@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.db import SkinDatabase
-from tradeup.generator import iter_recipes, optimize_recipe
-from tradeup.models import Rarity, Wear
-from tradeup.pricing.repository import StaticPricer
-from tradeup.scan import required_market_names, scan
-from tradeup.scoring import Ranking, ScreenConfig
+from tradeupfinder.db import SkinDatabase
+from tradeupfinder.generator import iter_recipes, optimize_recipe
+from tradeupfinder.models import Rarity, Wear
+from tradeupfinder.pricing.repository import StaticPricer
+from tradeupfinder.scan import required_market_names, scan
+from tradeupfinder.scoring import Ranking, ScreenConfig
 
 # Une collection ou le trade-up est rentable, une autre ou il ne l'est pas.
 RAW_DB = {
@@ -312,7 +312,7 @@ def test_la_dilution_suit_la_formule_de_probabilite():
     par le nombre de sorties et donnait 5.3 % a l'intruse au lieu de 10 % --
     elle sous-estimait de moitie ce qu'on ajoute justement pour diluer.
     """
-    from tradeup.ev import outcome_probabilities
+    from tradeupfinder.ev import outcome_probabilities
 
     db = SkinDatabase.from_dict(RAW_DB)
     rentables = db.collection("col_rentable").outcomes_for_input_rarity(
@@ -337,7 +337,7 @@ def test_une_collection_sans_sortie_ne_dilue_pas_la_masse():
     Les compter au denominateur ferait une masse inferieure a 1 -- une erreur
     facile a introduire en passant a la part par entrees.
     """
-    from tradeup.ev import outcome_probabilities
+    from tradeupfinder.ev import outcome_probabilities
 
     db = SkinDatabase.from_dict(RAW_DB)
     rentables = db.collection("col_rentable").outcomes_for_input_rarity(

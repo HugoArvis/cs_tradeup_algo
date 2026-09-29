@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.ev import InputItem, Outcome, TradeUpResult
-from tradeup.generator import InputOption
-from tradeup.models import Collection, Rarity, Skin, Wear
-from tradeup.plan import Plan
-from tradeup.report import render, write_and_open
+from tradeupfinder.ev import InputItem, Outcome, TradeUpResult
+from tradeupfinder.generator import InputOption
+from tradeupfinder.models import Collection, Rarity, Skin, Wear
+from tradeupfinder.plan import Plan
+from tradeupfinder.report import render, write_and_open
 
 ENTREE = Skin(key="de", name="Desert Eagle | Meteorite", collection_id="bank",
               rarity=Rarity.MIL_SPEC, min_float=0.0, max_float=1.0)

@@ -162,8 +162,8 @@ def verifie_rendu(tmp: Path, js: str) -> int:
 
 
 def main() -> int:
-    from tradeup.report import _JS
-    from tradeup.web import PAGE
+    from tradeupfinder.report import _JS
+    from tradeupfinder.web import PAGE
 
     blocs = extraire(PAGE, "web.PAGE") + [("report._JS", _JS)]
     if not blocs:

@@ -40,7 +40,15 @@ PASSAGES = (("matin", "07:47"), ("soir", "19:23"))
 BALAYAGE = ("balayage", "03:11", "balayage_nuit.cmd")
 
 #: Prefixe des taches creees, pour pouvoir les retrouver et les retirer.
-PREFIXE = "tradeup-quotidien"
+PREFIXE = "tradeupfinder-quotidien"
+
+#: Prefixes utilises AVANT un renommage du projet. Les taches deja enregistrees
+#: dans Windows gardent leur ancien nom : elles continuent de tourner, mais le
+#: code ne les reconnait plus. Sans cette liste, `schedule` les croit absentes
+#: et en enregistre de nouvelles -- soit DEUX passages a 07:47, chacun consommant
+#: le quota Steam de l'autre. Le defaut ne se voit pas : les deux taches
+#: reussissent.
+ANCIENS_PREFIXES = ("tradeup-quotidien",)
 
 #: Au-dela, le passage est considere comme bloque et arrete. Large, car une
 #: fenetre Steam ouverte peut demander plus d'une heure a 4 requetes/minute.
@@ -108,6 +116,25 @@ def lanceur(racine: Path | None = None) -> Path:
     """Chemin du script que le planificateur appellera."""
     base = racine or Path(__file__).resolve().parents[2]
     return base / "scripts" / "passage_quotidien.cmd"
+
+
+def survivantes() -> list[str]:
+    """Commande listant les taches restees sous un ANCIEN prefixe.
+
+    A appeler apres un renommage du projet : ces taches tournent toujours et
+    lanceraient un second passage en plus des nouvelles. Elles ne se signalent
+    pas d'elles-memes -- elles reussissent.
+    """
+    motifs = ",".join(f"'{p}-*'" for p in ANCIENS_PREFIXES)
+    return _ps(
+        f"Get-ScheduledTask -TaskName {motifs} -ErrorAction SilentlyContinue | "
+        f"Select-Object -ExpandProperty TaskName"
+    )
+
+
+def retire_ancienne(nom: str) -> list[str]:
+    """Commande retirant une tache laissee par un ancien nom de projet."""
+    return _ps(f"Unregister-ScheduledTask -TaskName '{nom}' -Confirm:$false")
 
 
 def taches(racine: Path | None = None) -> list[Tache]:

@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cs-tradeup-algo"
+name = "tradeupfinder"
 version = "0.1.0"
 description = "Aide a la decision pour les trade-up contracts CS2 : EV nette et variance"
 requires-python = ">=3.11"
@@ -15,8 +15,8 @@ dependencies = []  # noyau sans dependance : stdlib uniquement
 dev = ["pytest>=8", "pyflakes>=3"]
 
 [project.scripts]
-tradeup = "tradeup.cli:main"
-tradeup-web = "tradeup.web:main"
+tradeupfinder = "tradeupfinder.cli:main"
+tradeupfinder-web = "tradeupfinder.web:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
