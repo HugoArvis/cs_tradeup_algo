@@ -630,7 +630,7 @@ class _PlanMinimal:
 
 
 def _plan_minimal(ev_net, alt_cost, alt_prices, noms):
-    from tradeup.plan import Plan
+    from tradeupfinder.plan import Plan
 
     p = _PlanMinimal(ev_net, alt_cost, alt_prices,
                      tuple(type("O", (), {"name": n})() for n in noms))

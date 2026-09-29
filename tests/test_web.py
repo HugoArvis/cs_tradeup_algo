@@ -535,7 +535,7 @@ def test_un_plan_non_cote_ne_fait_pas_sauter_la_collection_suivante(app, monkeyp
 def test_chaque_onglet_a_son_panneau_et_reciproquement():
     import re
 
-    from tradeup.web import PAGE
+    from tradeupfinder.web import PAGE
 
     onglets = set(re.findall(r'data-pane="(\w+)"', PAGE))
     panneaux = set(re.findall(r'id="pane-(\w+)"', PAGE))
@@ -549,7 +549,7 @@ def test_les_ordres_dachat_vivent_dans_la_carte_pas_dans_un_onglet():
     """Un panier d'annonces ne se repete pas, un ordre d'achat si : les deux
     voies doivent donc se lire au meme endroit, sur le contrat. L'onglet separe
     refaisait tout le calcul et obligeait a comparer de tete."""
-    from tradeup.web import PAGE
+    from tradeupfinder.web import PAGE
 
     assert "pane-ordres" not in PAGE
     assert "/api/orders" not in PAGE
@@ -568,7 +568,7 @@ def test_une_grille_suivie_de_contenu_garde_un_espace_en_dessous():
     """
     import re
 
-    from tradeup.web import PAGE
+    from tradeupfinder.web import PAGE
 
     css = re.search(r"<style>(.*?)</style>", PAGE, re.S).group(1)
     assert re.search(r"\.grille>\.card\{[^}]*margin-bottom:0", css), \
