@@ -12,7 +12,7 @@ Toutes les commandes se tapent dans PowerShell, testées sur cette machine.
 ## Une seule fois : installer
 
 ```powershell
-cd "c:\dossier temporaire pour contourne O le maudit\Bureau temporaire\projets vscode\cs_tradeup_algo"
+cd "c:\dossier temporaire pour contourne O le maudit\Bureau temporaire\projets vscode\tradeupfinder"
 python -m pip install -e .
 python -m scripts.build_db
 ```
