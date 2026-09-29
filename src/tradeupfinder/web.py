@@ -1050,6 +1050,7 @@ color:var(--muted);font-weight:600}
 .pane{display:none}.pane.on{display:block}
 button.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
 button.sm{padding:3px 10px;font-size:13px}
+button.retour{margin-bottom:14px;background:var(--card)}
 tr.done td{opacity:.55}
 .bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
 .bar>i{display:block;height:100%;background:var(--accent)}
@@ -1641,6 +1642,17 @@ async function dernierBalayage() {
 // --- La recherche -----------------------------------------------------------
 
 let sondageBatch = null, dernierBatch = null;
+
+// La vue d'un plan s'ouvre depuis la liste des contrats, dans un AUTRE onglet :
+// sans retour explicite, revenir a la liste demandait de retrouver l'onglet et
+// la ligne a la main. On memorise donc ou l'on etait.
+let positionListe = 0;
+let chargementContrats = Promise.resolve();
+
+function boutonRetour() {
+  return `<button class="ghost retour" data-retour="1">← Retour à mes
+    contrats</button>`;
+}
 // Un plan enregistre ne change plus : le relire a chaque sondage serait du
 // trafic pur.
 const plansCharges = {};
@@ -1747,7 +1759,9 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     p.classList.toggle('on', p.id === 'pane-' + t.dataset.pane));
   // Les plans calcules et les contrats suivis sont deux vues du meme objet
   // et partagent desormais un onglet : un seul clic charge les deux.
-  if (t.dataset.pane === 'contrats') { contrats(); histo(); }
+  if (t.dataset.pane === 'contrats') {
+    chargementContrats = Promise.all([contrats(), histo()]);
+  }
   if (t.dataset.pane === 'inventaire') invApercu(false);
 });
 
@@ -1908,10 +1922,25 @@ document.addEventListener('click', async e => {
   if (v) {
     const r = await fetch('/api/plan/' + v.dataset.voir).then(x => x.json());
     if (r.error) { banniere(r.error, true); return; }
+    positionListe = window.scrollY;
     document.querySelector('.tab[data-pane="calcul"]').click();
-    $('#avancement').innerHTML = '';
+    $('#avancement').innerHTML = boutonRetour();
     $('#resultats').innerHTML = carte(r.plan, v.dataset.voir, true);
-    $('#resultats').scrollIntoView({behavior: 'smooth', block: 'start'});
+    // Le bouton est AU-DESSUS de la carte : viser la carte le cacherait.
+    $('#avancement').scrollIntoView({behavior: 'smooth', block: 'start'});
+    return;
+  }
+  if (e.target.closest('[data-retour]')) {
+    // La vue d'un plan avait pris la place des resultats du jour : on les
+    // remet, sans quoi l'onglet Calculer resterait fige sur ce plan.
+    $('#avancement').innerHTML = '';
+    $('#resultats').innerHTML = '';
+    dernierBalayage();
+    document.querySelector('.tab[data-pane="contrats"]').click();
+    // La liste se recharge : restaurer la position avant qu'elle soit
+    // redessinee retomberait sur une page trop courte.
+    await chargementContrats;
+    window.scrollTo(0, positionListe);
     return;
   }
   const f = e.target.closest('[data-follow]');

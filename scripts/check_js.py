@@ -144,6 +144,7 @@ const __cas = [
   ['bandeau des contrats', () => statsContrats([__contrat,
      { ...__contrat, status: 'realise' }])],
   ['bandeau des contrats, vide', () => statsContrats([])],
+  ['bouton de retour a la liste', () => boutonRetour()],
   ['contrat a acheter', () => carteContrat(__contrat)],
   ['contrat executable',
    () => carteContrat({ ...__contrat, purchased: 10, complete: true,
