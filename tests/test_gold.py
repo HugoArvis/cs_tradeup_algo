@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.db import SkinDatabase
-from tradeup.gold import (
+from tradeupfinder.db import SkinDatabase
+from tradeupfinder.gold import (
     GOLD_INPUT_COUNT,
     Crate,
     best_for_crate,
@@ -20,8 +20,8 @@ from tradeup.gold import (
     load_crates,
     scan_crates,
 )
-from tradeup.models import Rarity, Skin, Wear
-from tradeup.pricing.repository import StaticPricer
+from tradeupfinder.models import Rarity, Skin, Wear
+from tradeupfinder.pricing.repository import StaticPricer
 
 
 @pytest.fixture(scope="module")

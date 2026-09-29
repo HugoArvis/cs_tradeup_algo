@@ -8,7 +8,7 @@ mourait donc systematiquement, en affichant un message de quota epuise.
 
 from __future__ import annotations
 
-from tradeup.pricing.http import HttpClient, RateLimiter
+from tradeupfinder.pricing.http import HttpClient, RateLimiter
 
 
 def test_aucun_user_agent_maison_par_defaut():

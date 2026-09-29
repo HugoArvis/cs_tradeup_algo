@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from tradeup.daily import (
+from tradeupfinder.daily import (
     DECISION_MAX_AGE,
     Ligne,
     Passage,
@@ -25,11 +25,11 @@ from tradeup.daily import (
     noms_prioritaires,
     recoter,
 )
-from tradeup.db import SkinDatabase
-from tradeup.models import Rarity
-from tradeup.pricing.base import Quote
-from tradeup.pricing.cache import QuoteCache
-from tradeup.scoring import Candidate
+from tradeupfinder.db import SkinDatabase
+from tradeupfinder.models import Rarity
+from tradeupfinder.pricing.base import Quote
+from tradeupfinder.pricing.cache import QuoteCache
+from tradeupfinder.scoring import Candidate
 
 RAW_DB = {
     "version": "test",
@@ -169,7 +169,7 @@ class MarcheQuiFerme:
         self.appels = 0
 
     def refresh(self, nom):
-        from tradeup.pricing.http import RateLimited
+        from tradeupfinder.pricing.http import RateLimited
 
         self.appels += 1
         if self.restant <= 0:
@@ -334,7 +334,7 @@ def test_un_melange_reste_une_piste(db, cache, monkeypatch):
 
     L'afficher sans le dire laisserait croire qu'il a ete verifie.
     """
-    from tradeup.daily import confirmer
+    from tradeupfinder.daily import confirmer
 
     lignes = [Ligne("7x Collection A + 3x Collection B", 1.0, 1.2, 1.2, 0.9, 600)]
     sortie = confirmer(db, lignes,
@@ -347,12 +347,12 @@ def test_un_melange_reste_une_piste(db, cache, monkeypatch):
 
 def test_un_echec_de_confirmation_ne_fait_pas_tomber_le_passage(db, monkeypatch):
     """Une collection qui casse ne doit pas emporter les autres."""
-    from tradeup import daily as mod
+    from tradeupfinder import daily as mod
 
     def boum(*a, **k):
         raise RuntimeError("quota")
 
-    monkeypatch.setattr("tradeup.plan.build_plan", boum)
+    monkeypatch.setattr("tradeupfinder.plan.build_plan", boum)
     lignes = [Ligne("Collection A", 1.0, 1.2, 1.2, 0.9, 600)]
     sortie = mod.confirmer(
         db, lignes,
@@ -364,9 +364,9 @@ def test_un_echec_de_confirmation_ne_fait_pas_tomber_le_passage(db, monkeypatch)
 
 def test_pas_assez_dannonces_se_distingue_dun_contrat_perdant(db, monkeypatch):
     """Sans la distinction, "aucune occasion" masque "aucune donnee"."""
-    from tradeup import daily as mod
+    from tradeupfinder import daily as mod
 
-    monkeypatch.setattr("tradeup.plan.build_plan", lambda *a, **k: None)
+    monkeypatch.setattr("tradeupfinder.plan.build_plan", lambda *a, **k: None)
     lignes = [Ligne("Collection A", 1.0, 1.2, 1.2, 0.9, 600)]
     sortie = mod.confirmer(
         db, lignes,
@@ -386,7 +386,7 @@ def test_le_balayage_reprend_par_les_collections_jamais_faites(tmp_path):
     collections de la fin ne sont JAMAIS calculees -- le meme piege que le TTL
     qui ne remontait pas jusqu'a la source.
     """
-    from tradeup.journal import Journal
+    from tradeupfinder.journal import Journal
 
     j = Journal(Path(tmp_path) / "j.db")
     plan = {"collection": "A", "cost": 1.0, "net": 1.0, "profit": 0.0,
@@ -407,7 +407,7 @@ def test_le_balayage_reprend_par_les_collections_jamais_faites(tmp_path):
 
 
 def test_une_rarete_jamais_balayee_ne_casse_pas_l_ordre(tmp_path):
-    from tradeup.journal import Journal
+    from tradeupfinder.journal import Journal
 
     j = Journal(Path(tmp_path) / "j.db")
     assert j.last_swept("mil-spec") == {}

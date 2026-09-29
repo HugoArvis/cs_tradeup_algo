@@ -25,7 +25,7 @@ Votre clé CSFloat est déjà enregistrée dans le fichier `.env`. Rien à faire
 Vérifiez que tout marche :
 
 ```powershell
-python -m tradeup.cli db
+python -m tradeupfinder.cli db
 ```
 
 Vous devez voir `Base : 94 collections, 1451 skins`.
@@ -37,7 +37,7 @@ Vous devez voir `Base : 94 collections, 1451 skins`.
 Une seule commande, puis tout se fait à la souris :
 
 ```powershell
-python -m tradeup.web
+python -m tradeupfinder.web
 ```
 
 Votre navigateur s'ouvre sur la liste des collections. Vous choisissez la
@@ -121,7 +121,7 @@ Ce fichier contient vos données personnelles : il est exclu de git.
 ### 1. Obtenir le panier à acheter
 
 ```powershell
-python -m tradeup.cli plan "The Bank Collection" --html
+python -m tradeupfinder.cli plan "The Bank Collection" --html
 ```
 
 C'est **la** commande. Elle interroge les annonces réellement en vente sur
@@ -196,7 +196,7 @@ calcul de l'outil est faux.
 ### Étape 2 — Obtenir le panier
 
 ```powershell
-python -m tradeup.cli plan "The Bank Collection"
+python -m tradeupfinder.cli plan "The Bank Collection"
 ```
 
 ### Étape 3 — Acheter sur CSFloat
@@ -247,7 +247,7 @@ vous dira tout.
 
 | Message | Cause | Solution |
 |---|---|---|
-| `No module named tradeup` | mauvais dossier | refaire le `cd` puis l'installation |
+| `No module named tradeupfinder` | mauvais dossier | refaire le `cd` puis l'installation |
 | `requires a different Python` | vous avez tapé `pip` | tapez `python -m pip` |
 | `Base introuvable` | base non construite | `python -m scripts.build_db` |
 | `Cle API CSFloat absente` | `.env` perdu | remettre `CSFLOAT_API_KEY=...` dedans |
@@ -265,7 +265,7 @@ Pour voir quelles collections ont peu de sorties possibles (donc peu de
 variance), sans aucune requête réseau :
 
 ```powershell
-python -m tradeup.cli collections --rarity mil-spec --max-outcomes 2
+python -m tradeupfinder.cli collections --rarity mil-spec --max-outcomes 2
 ```
 
 Les 9 collections marquées `<<` ont **une seule sortie possible**. Je les ai
@@ -275,7 +275,7 @@ toutes testées sur CSFloat : seule **The Bank** est nettement rentable
 Pour tester une autre collection :
 
 ```powershell
-python -m tradeup.cli plan "The Dust 2 Collection"
+python -m tradeupfinder.cli plan "The Dust 2 Collection"
 ```
 
 > Allez-y doucement : chaque `plan` consomme une trentaine de requêtes CSFloat

@@ -14,9 +14,9 @@ import time
 
 import pytest
 
-from tradeup.db import SkinDatabase
-from tradeup.pricing.http import RateLimited
-from tradeup.web import App, Job
+from tradeupfinder.db import SkinDatabase
+from tradeupfinder.pricing.http import RateLimited
+from tradeupfinder.web import App, Job
 
 RAW_DB = {
     "version": "test",
@@ -83,7 +83,7 @@ def test_le_quota_epuise_donne_un_etat_lisible(app, monkeypatch):
     def boom(*a, **kw):
         raise RateLimited("429")
 
-    monkeypatch.setattr("tradeup.web.build_plan", boom)
+    monkeypatch.setattr("tradeupfinder.web.build_plan", boom)
     job = app.start_plan("col_a", "mil-spec")
     _attendre(job)
 
@@ -95,7 +95,7 @@ def test_le_quota_epuise_donne_un_etat_lisible(app, monkeypatch):
 
 def test_une_erreur_inattendue_ne_bloque_pas_l_interface(app, monkeypatch):
     monkeypatch.setattr(
-        "tradeup.web.build_plan",
+        "tradeupfinder.web.build_plan",
         lambda *a, **kw: (_ for _ in ()).throw(ValueError("casse")),
     )
     job = app.start_plan("col_a", "mil-spec")
@@ -107,7 +107,7 @@ def test_une_erreur_inattendue_ne_bloque_pas_l_interface(app, monkeypatch):
 
 
 def test_absence_d_annonces_est_distinguee_d_une_erreur(app, monkeypatch):
-    monkeypatch.setattr("tradeup.web.build_plan", lambda *a, **kw: None)
+    monkeypatch.setattr("tradeupfinder.web.build_plan", lambda *a, **kw: None)
     job = app.start_plan("col_a", "mil-spec")
     _attendre(job)
 
@@ -116,7 +116,7 @@ def test_absence_d_annonces_est_distinguee_d_une_erreur(app, monkeypatch):
 
 
 def test_deux_taches_coexistent(app, monkeypatch):
-    monkeypatch.setattr("tradeup.web.build_plan", lambda *a, **kw: None)
+    monkeypatch.setattr("tradeupfinder.web.build_plan", lambda *a, **kw: None)
     a = app.start_plan("col_a", "mil-spec")
     b = app.start_plan("col_b", "mil-spec")
     assert a.id != b.id
@@ -129,7 +129,7 @@ def test_deux_taches_coexistent(app, monkeypatch):
 
 
 def test_la_cle_api_ne_sort_jamais(app, monkeypatch):
-    monkeypatch.setattr("tradeup.web.build_plan", lambda *a, **kw: None)
+    monkeypatch.setattr("tradeupfinder.web.build_plan", lambda *a, **kw: None)
     job = app.start_plan("col_a", "mil-spec")
     _attendre(job)
 
@@ -140,7 +140,7 @@ def test_la_cle_api_ne_sort_jamais(app, monkeypatch):
 
 
 def test_la_page_ne_contient_aucun_secret():
-    from tradeup.web import PAGE
+    from tradeupfinder.web import PAGE
 
     assert "CSFLOAT_API_KEY" not in PAGE
     assert "Authorization" not in PAGE
@@ -158,7 +158,7 @@ def _attendre(job: Job, timeout: float = 5.0) -> None:
 
 def test_le_contrat_expose_le_reel_et_le_prevu(tmp_path):
     """L'interface doit pouvoir montrer l'ecart, pas seulement le plan."""
-    from tradeup.journal import Journal
+    from tradeupfinder.journal import Journal
 
     j = Journal(tmp_path / "j.db")
     app = App(SkinDatabase.from_dict(RAW_DB), "cle", journal=j)
@@ -184,7 +184,7 @@ def test_le_contrat_expose_le_reel_et_le_prevu(tmp_path):
 
 
 def test_le_payload_de_contrat_ne_fuit_pas_la_cle(tmp_path):
-    from tradeup.journal import Journal
+    from tradeupfinder.journal import Journal
 
     j = Journal(tmp_path / "j.db")
     app = App(SkinDatabase.from_dict(RAW_DB), "cle-ultra-secrete", journal=j)
@@ -204,7 +204,7 @@ def test_le_libelle_de_rarete_est_uniforme():
     Sans conversion, l'historique et les resultats du jour afficheraient deux
     ecritures de la meme chose.
     """
-    from tradeup.web import libelle_rarete
+    from tradeupfinder.web import libelle_rarete
 
     assert libelle_rarete("mil-spec") == "Mil-Spec Grade"
     assert libelle_rarete("industrial") == "Industrial Grade"
@@ -218,7 +218,7 @@ def test_le_libelle_de_rarete_est_uniforme():
 
 
 def inventaire_de_test(n=10, nom="Arme A (Factory New)"):
-    from tradeup.inventory import OwnedItem
+    from tradeupfinder.inventory import OwnedItem
 
     return [
         OwnedItem(market_hash_name=nom, float_value=0.01 + i * 0.001,
@@ -251,7 +251,7 @@ def test_lapercu_chiffre_lecart_quand_il_manque_des_objets(app, monkeypatch):
 
 
 def test_le_calcul_dinventaire_produit_un_resultat_exploitable(app, monkeypatch):
-    from tradeup.pricing.repository import StaticPricer
+    from tradeupfinder.pricing.repository import StaticPricer
 
     prix = {}
     for nom in ("Arme A", "Sortie A"):
@@ -261,8 +261,8 @@ def test_le_calcul_dinventaire_produit_un_resultat_exploitable(app, monkeypatch)
 
     monkeypatch.setattr(app, "inventaire", lambda **k: inventaire_de_test())
     monkeypatch.setattr(app, "load_currency", lambda: None)
-    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: None)
-    monkeypatch.setattr("tradeup.web.CSFloatPricer",
+    monkeypatch.setattr("tradeupfinder.web.CSFloat", lambda *a, **k: None)
+    monkeypatch.setattr("tradeupfinder.web.CSFloatPricer",
                         lambda *a, **k: StaticPricer(prix))
 
     job = app.start_inventory("mil-spec")
@@ -307,7 +307,7 @@ def test_linventaire_nest_pas_relu_a_chaque_clic(app, monkeypatch):
             appels.append(1)
             return []
 
-    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: FakeSource())
+    monkeypatch.setattr("tradeupfinder.web.CSFloat", lambda *a, **k: FakeSource())
     app.inventaire()
     app.inventaire()
     assert len(appels) == 1
@@ -318,7 +318,7 @@ def test_linventaire_nest_pas_relu_a_chaque_clic(app, monkeypatch):
 def test_le_payload_dinventaire_porte_de_quoi_classer(app, monkeypatch):
     """L'interface reclasse cote client : elle a besoin des grandeurs, pas
     seulement du gain."""
-    from tradeup.pricing.repository import StaticPricer
+    from tradeupfinder.pricing.repository import StaticPricer
 
     prix = {}
     for nom in ("Arme A", "Sortie A"):
@@ -328,8 +328,8 @@ def test_le_payload_dinventaire_porte_de_quoi_classer(app, monkeypatch):
 
     monkeypatch.setattr(app, "inventaire", lambda **k: inventaire_de_test())
     monkeypatch.setattr(app, "load_currency", lambda: None)
-    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: None)
-    monkeypatch.setattr("tradeup.web.CSFloatPricer",
+    monkeypatch.setattr("tradeupfinder.web.CSFloat", lambda *a, **k: None)
+    monkeypatch.setattr("tradeupfinder.web.CSFloatPricer",
                         lambda *a, **k: StaticPricer(prix))
 
     job = app.start_inventory("mil-spec")
@@ -355,7 +355,7 @@ def test_le_balayage_ne_renvoie_que_les_contrats_rentables(app):
     Un contrat a 99 % est ecarte comme un contrat a 40 % : il perd de
     l'argent, l'ecart n'est que de degre.
     """
-    from tradeup.web import Batch
+    from tradeupfinder.web import Batch
 
     b = Batch(id="x", rarity="mil-spec", pending=[], total=4)
     b.done = [
@@ -372,7 +372,7 @@ def test_le_balayage_ne_renvoie_que_les_contrats_rentables(app):
 
 def test_le_balayage_dit_qu_il_a_travaille_meme_sans_resultat(app):
     """Sinon "aucun resultat" est indiscernable d'une panne."""
-    from tradeup.web import Batch
+    from tradeupfinder.web import Batch
 
     b = Batch(id="y", rarity="mil-spec", pending=[], total=2)
     b.done = [{"plan_id": "p1", "profitability": 0.80, "profit": -1.0}]
@@ -408,7 +408,7 @@ def test_la_devise_du_compte_est_lue_et_convertit_les_montants(app, monkeypatch)
             assert devise == "EUR"
             return 0.92
 
-    monkeypatch.setattr("tradeup.web.CSFloat", FauxCSFloat)
+    monkeypatch.setattr("tradeupfinder.web.CSFloat", FauxCSFloat)
     app.load_currency()
 
     assert app.currency == "EUR" and app.currency_known is True
@@ -424,7 +424,7 @@ def test_une_devise_illisible_reste_signalee_comme_inconnue(app, monkeypatch):
         def account_currency(self):
             raise RuntimeError("API muette")
 
-    monkeypatch.setattr("tradeup.web.CSFloat", CSFloatMuet)
+    monkeypatch.setattr("tradeupfinder.web.CSFloat", CSFloatMuet)
     app.load_currency()
 
     assert app.currency == "USD" and app.currency_known is False
@@ -439,7 +439,7 @@ def test_un_compte_en_dollars_est_une_reponse_pas_un_defaut(app, monkeypatch):
         def account_currency(self):
             return "USD"
 
-    monkeypatch.setattr("tradeup.web.CSFloat", CSFloatUSD)
+    monkeypatch.setattr("tradeupfinder.web.CSFloat", CSFloatUSD)
     app.load_currency()
 
     assert app.currency == "USD" and app.currency_known is True
@@ -452,8 +452,8 @@ def test_la_base_de_prix_ventes_change_le_verdict(app):
     81,5 % ; achete au prix reellement negocie, a 100 %. Tout l'ecart vient
     d'une seule entree, vendue 0,09 quand elle etait affichee 0,11.
     """
-    from tradeup.fees import steam_net_proceeds
-    from tradeup.pricing.base import Quote
+    from tradeupfinder.fees import steam_net_proceeds
+    from tradeupfinder.pricing.base import Quote
 
     q = Quote(market_hash_name="X", source="steam", lowest_price=0.11,
               median_price=0.09, volume=83, currency="EUR")
@@ -482,9 +482,9 @@ def test_un_plan_aux_sorties_non_cotees_nest_pas_enregistre(app, monkeypatch):
     class FauxPlan:
         result = FauxResultat()
 
-    monkeypatch.setattr("tradeup.web.build_plan", lambda *a, **k: FauxPlan())
+    monkeypatch.setattr("tradeupfinder.web.build_plan", lambda *a, **k: FauxPlan())
     monkeypatch.setattr(app, "load_currency", lambda: None)
-    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: None)
+    monkeypatch.setattr("tradeupfinder.web.CSFloat", lambda *a, **k: None)
     monkeypatch.setattr(app, "revente", lambda: None)
 
     batch = app.start_batch("mil-spec")
@@ -511,9 +511,9 @@ def test_un_plan_non_cote_ne_fait_pas_sauter_la_collection_suivante(app, monkeyp
     class FauxPlan:
         result = FauxResultat()
 
-    monkeypatch.setattr("tradeup.web.build_plan", lambda *a, **k: FauxPlan())
+    monkeypatch.setattr("tradeupfinder.web.build_plan", lambda *a, **k: FauxPlan())
     monkeypatch.setattr(app, "load_currency", lambda: None)
-    monkeypatch.setattr("tradeup.web.CSFloat", lambda *a, **k: None)
+    monkeypatch.setattr("tradeupfinder.web.CSFloat", lambda *a, **k: None)
     monkeypatch.setattr(app, "revente", lambda: None)
 
     batch = app.start_batch("mil-spec")

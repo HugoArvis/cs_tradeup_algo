@@ -1,4 +1,4 @@
-# cs_tradeup_algo
+# TradeUpFinder
 
 Aide à la décision pour les **trade-up contracts CS2** : calcule l'espérance de
 gain nette après frais et la variance de chaque contrat possible, puis classe
@@ -41,9 +41,9 @@ machine, ou copiez `data/journal.db` à la main.
 > l'installation échoue (`requires a different Python: 3.9 not in '>=3.11'`).
 > `python -m pip` installe forcément dans le Python qui exécutera le code.
 
-> **La commande s'invoque `python -m tradeup.cli`.** Le raccourci `tradeup`
+> **La commande s'invoque `python -m tradeupfinder.cli`.** Le raccourci `tradeupfinder`
 > n'existe que si le dossier `Scripts/` de votre Python est dans le `PATH`, ce
-> qui n'est pas le cas par défaut sous Windows. `python -m tradeup.cli`
+> qui n'est pas le cas par défaut sous Windows. `python -m tradeupfinder.cli`
 > fonctionne toujours, et depuis n'importe quel dossier une fois installé.
 
 Sans installer du tout, depuis la racine du projet :
@@ -58,19 +58,19 @@ $env:PYTHONPATH = "src"      # PowerShell
 Application locale (recommandé) :
 
 ```bash
-python -m tradeup.web        # ouvre le navigateur, tout se fait à la souris
+python -m tradeupfinder.web        # ouvre le navigateur, tout se fait à la souris
 ```
 
 En ligne de commande :
 
 ```bash
-python -m tradeup.cli plan "The Bank Collection" --html
-python -m tradeup.cli db --list                    # état de la base statique
-python -m tradeup.cli inspect "The Recoil Collection" --rarity mil-spec
-python -m tradeup.cli price "AK-47 | Redline (Field-Tested)" --fresh
-python -m tradeup.cli scan --rarity mil-spec --collections "The Recoil Collection" --detail
-python -m tradeup.cli scan --rarity restricted --offline --rank safety
-python -m tradeup.cli cache --prune 30
+python -m tradeupfinder.cli plan "The Bank Collection" --html
+python -m tradeupfinder.cli db --list                    # état de la base statique
+python -m tradeupfinder.cli inspect "The Recoil Collection" --rarity mil-spec
+python -m tradeupfinder.cli price "AK-47 | Redline (Field-Tested)" --fresh
+python -m tradeupfinder.cli scan --rarity mil-spec --collections "The Recoil Collection" --detail
+python -m tradeupfinder.cli scan --rarity restricted --offline --rank safety
+python -m tradeupfinder.cli cache --prune 30
 ```
 
 Le premier scan en ligne est lent (limite Steam ~15 requêtes/min) ; il remplit
@@ -263,7 +263,7 @@ contrainte de budget.
 ## Structure
 
 ```
-src/tradeup/
+src/tradeupfinder/
   models.py      raretés, usures, skins, collections
   wear.py        float de sortie, paliers, points de rupture d'EV
   fees.py        frais Steam / CSFloat / Buff163

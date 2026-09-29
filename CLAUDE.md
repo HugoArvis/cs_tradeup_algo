@@ -57,14 +57,14 @@ python -m scripts.build_db            # (re)construit data/collections.json
 python -m pytest -q                   # 150 tests, < 15 s
 python -m pytest tests/test_core.py -k probabilites
 python scripts/check_js.py            # apres toute retouche du JS de web.py
-python -m tradeup.web                 # application locale, port 8765
-python -m tradeup.cli plan "The Bank Collection" --rarity industrial --html
-python -m tradeup.cli verify --collection "The Bank Collection" --rarity industrial
-python -m tradeup.cli orders --rarity mil-spec   # prix d'ordre d'achat a placer
-python -m tradeup.cli daily --rarity industrial  # passage quotidien, code 10 si actionnable
+python -m tradeupfinder.web                 # application locale, port 8765
+python -m tradeupfinder.cli plan "The Bank Collection" --rarity industrial --html
+python -m tradeupfinder.cli verify --collection "The Bank Collection" --rarity industrial
+python -m tradeupfinder.cli orders --rarity mil-spec   # prix d'ordre d'achat a placer
+python -m tradeupfinder.cli daily --rarity industrial  # passage quotidien, code 10 si actionnable
 ```
 
-Le raccourci `tradeup` n'est pas dans le `PATH` : passer par `python -m tradeup.cli`.
+Le raccourci `tradeupfinder` n'est pas dans le `PATH` : passer par `python -m tradeupfinder.cli`.
 
 ## Environnement
 

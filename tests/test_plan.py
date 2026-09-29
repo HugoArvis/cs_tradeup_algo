@@ -11,13 +11,13 @@ from dataclasses import dataclass
 
 import pytest
 
-from tradeup.generator import (
+from tradeupfinder.generator import (
     InputOption,
     cheapest_selection,
     cheapest_unique_selection,
     options_from_listings,
 )
-from tradeup.models import Rarity, Skin, Wear
+from tradeupfinder.models import Rarity, Skin, Wear
 
 SKIN = Skin(key="s", name="Arme", collection_id="c", rarity=Rarity.MIL_SPEC,
             min_float=0.0, max_float=1.0)
@@ -137,8 +137,8 @@ def test_limitation_du_nombre_doffres_par_skin():
 def test_le_plan_porte_la_rarete_dentree():
     """Sans elle, rien en aval ne pouvait l'afficher : ni le rapport, ni le
     nom du fichier, ni l'historique de l'application web."""
-    from tradeup.models import Rarity
-    from tradeup.plan import Plan
+    from tradeupfinder.models import Rarity
+    from tradeupfinder.plan import Plan
 
     assert "rarity" in Plan.__dataclass_fields__
     assert Plan.__dataclass_fields__["rarity"].default is Rarity.MIL_SPEC
@@ -161,7 +161,7 @@ class FauxMarcheDeVente:
         self.appels: list[str] = []
 
     def fetch(self, market_hash_name: str, *, use_cache: bool = True):
-        from tradeup.pricing.base import Quote
+        from tradeupfinder.pricing.base import Quote
 
         self.appels.append(market_hash_name)
         p = self.prix.get(market_hash_name)
@@ -173,8 +173,8 @@ class FauxMarcheDeVente:
 
 
 def _pricer(prix_steam, **kw):
-    from tradeup.fees import STEAM
-    from tradeup.plan import CSFloatPricer
+    from tradeupfinder.fees import STEAM
+    from tradeupfinder.plan import CSFloatPricer
 
     marche = FauxMarcheDeVente(prix_steam, **kw)
     return CSFloatPricer(source=None, safety_margin=0.0,
@@ -218,8 +218,8 @@ def test_une_sortie_sans_prix_steam_se_rabat_sur_csfloat():
     repli, une panne de Steam rend tout le balayage inexploitable -- mesure du
     22 septembre, 9 collections sur 88 et zero enregistree.
     """
-    from tradeup.fees import STEAM
-    from tradeup.plan import CSFloatPricer
+    from tradeupfinder.fees import STEAM
+    from tradeupfinder.plan import CSFloatPricer
 
     nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
     marche = FauxMarcheDeVente({})          # Steam ne connait rien
@@ -258,7 +258,7 @@ def test_la_liquidite_est_lue_sur_le_marche_de_vente_sans_requete_de_plus():
 
 def test_sans_marche_de_vente_le_comportement_dorigine_est_conserve():
     """Le mode historique -- revendre sur CSFloat -- reste disponible."""
-    from tradeup.plan import CSFloatPricer
+    from tradeupfinder.plan import CSFloatPricer
 
     pricer = CSFloatPricer(source=None, sell_fee=0.02, safety_margin=0.0)
     pricer._book[SKIN.market_hash_name(Wear.FACTORY_NEW)] = [(0.01, 10.0)]
@@ -271,7 +271,7 @@ def test_les_frais_sappliquent_avant_la_conversion_de_devise():
     Convertir d'abord puis appliquer les frais deplace le plancher, et le
     deplace precisement la ou il decide : en bas de l'echelle.
     """
-    from tradeup.fees import STEAM, steam_net_proceeds
+    from tradeupfinder.fees import STEAM, steam_net_proceeds
 
     nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
     eur_vers_usd = 1 / 0.92
@@ -309,7 +309,7 @@ class MarcheAvecHistorique(FauxMarcheDeVente):
         self.ventes = ventes
 
     def fetch(self, market_hash_name: str, *, use_cache: bool = True):
-        from tradeup.pricing.base import Quote
+        from tradeupfinder.pricing.base import Quote
 
         self.appels.append(market_hash_name)
         if market_hash_name not in self.prix:
@@ -321,8 +321,8 @@ class MarcheAvecHistorique(FauxMarcheDeVente):
 
 
 def _pricer_historique(annonces, ventes, basis):
-    from tradeup.fees import STEAM
-    from tradeup.plan import CSFloatPricer
+    from tradeupfinder.fees import STEAM
+    from tradeupfinder.plan import CSFloatPricer
 
     marche = MarcheAvecHistorique(annonces, ventes)
     return CSFloatPricer(source=None, safety_margin=0.0, sell_source=marche,
@@ -331,7 +331,7 @@ def _pricer_historique(annonces, ventes, basis):
 
 def test_la_base_ventes_retient_le_prix_negocie_pas_le_prix_demande():
     """Mesure sur une sortie Bank : affichee 0,28, vendue 0,24."""
-    from tradeup.fees import steam_net_proceeds
+    from tradeupfinder.fees import steam_net_proceeds
 
     nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
     ventes = _pricer_historique({nom: 0.28}, {nom: 0.24}, "sales")
@@ -358,7 +358,7 @@ def test_un_prix_negocie_superieur_a_l_annonce_est_plafonne():
     second exemplaire quand le premier est moins cher. Les deux bases
     coincident donc ici, et c'est normal.
     """
-    from tradeup.fees import steam_net_proceeds
+    from tradeupfinder.fees import steam_net_proceeds
 
     nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
     ventes = _pricer_historique({nom: 0.88}, {nom: 0.91}, "sales")
@@ -371,7 +371,7 @@ def test_un_prix_negocie_superieur_a_l_annonce_est_plafonne():
 
 def test_sans_historique_de_vente_on_retombe_sur_l_annonce():
     """Un objet jamais vendu n'est pas un objet gratuit."""
-    from tradeup.fees import steam_net_proceeds
+    from tradeupfinder.fees import steam_net_proceeds
 
     nom = SKIN.market_hash_name(Wear.FACTORY_NEW)
     p = _pricer_historique({nom: 0.50}, {}, "sales")
@@ -388,8 +388,8 @@ def test_un_marche_de_revente_en_panne_est_reconnu():
     """
     import urllib.error
 
-    from tradeup.fees import STEAM
-    from tradeup.plan import CSFloatPricer
+    from tradeupfinder.fees import STEAM
+    from tradeupfinder.plan import CSFloatPricer
 
     class MarcheMort:
         name = "steam"
@@ -407,8 +407,8 @@ def test_un_marche_de_revente_en_panne_est_reconnu():
 
 def test_une_cotation_reussie_remet_le_compteur_a_zero():
     """Deux echecs isoles separes par une reussite ne sont pas une panne."""
-    from tradeup.fees import STEAM
-    from tradeup.plan import CSFloatPricer
+    from tradeupfinder.fees import STEAM
+    from tradeupfinder.plan import CSFloatPricer
 
     class MarcheCapricieux:
         name = "steam"
@@ -417,7 +417,7 @@ def test_une_cotation_reussie_remet_le_compteur_a_zero():
             self.n = 0
 
         def fetch(self, nom, *, use_cache=True):
-            from tradeup.pricing.base import Quote
+            from tradeupfinder.pricing.base import Quote
 
             self.n += 1
             if self.n % 2:
@@ -439,8 +439,8 @@ def test_un_marche_en_panne_nest_plus_interroge():
     qu'avant -- 37 minutes d'attente par collection pour un echec connu des le
     troisieme nom.
     """
-    from tradeup.fees import STEAM
-    from tradeup.plan import CSFloatPricer
+    from tradeupfinder.fees import STEAM
+    from tradeupfinder.plan import CSFloatPricer
 
     class MarcheMortCompteur:
         name = "steam"
@@ -470,7 +470,7 @@ def test_un_marche_en_panne_nest_plus_interroge():
 
 def _plan_factice(cout_base, cout_profond, ev):
     """Un Plan minimal, pour exercer les seules proprietes de profondeur."""
-    from tradeup.plan import Plan
+    from tradeupfinder.plan import Plan
 
     class FauxResultat:
         ev_net = ev
@@ -535,9 +535,9 @@ def test_le_budget_est_respecte_pendant_la_collecte_des_annonces():
     """
     import time
 
-    from tradeup.db import SkinDatabase
-    from tradeup.models import Rarity
-    from tradeup.plan import BudgetEpuise, build_plan
+    from tradeupfinder.db import SkinDatabase
+    from tradeupfinder.models import Rarity
+    from tradeupfinder.plan import BudgetEpuise, build_plan
 
     RAW = {"version": "t", "collections": [{
         "id": "c", "name": "C", "skins": [
@@ -564,7 +564,7 @@ def test_le_budget_est_respecte_pendant_la_collecte_des_annonces():
 
 def test_sans_echeance_le_comportement_est_inchange():
     """Le budget est optionnel : `plan` en ligne de commande n'en a pas."""
-    from tradeup.plan import _verifie_budget
+    from tradeupfinder.plan import _verifie_budget
 
     _verifie_budget(None)          # ne doit rien lever
 
@@ -572,7 +572,7 @@ def test_sans_echeance_le_comportement_est_inchange():
 def test_une_echeance_future_ne_coupe_pas():
     import time
 
-    from tradeup.plan import _verifie_budget
+    from tradeupfinder.plan import _verifie_budget
 
     _verifie_budget(time.time() + 3600)
 
@@ -586,8 +586,8 @@ def test_le_budget_coupe_aussi_la_valorisation_des_sorties():
     """
     import time
 
-    from tradeup.fees import STEAM
-    from tradeup.plan import BudgetEpuise, CSFloatPricer
+    from tradeupfinder.fees import STEAM
+    from tradeupfinder.plan import BudgetEpuise, CSFloatPricer
 
     class MarcheCompteur:
         name = "steam"
@@ -597,7 +597,7 @@ def test_le_budget_coupe_aussi_la_valorisation_des_sorties():
 
         def fetch(self, nom, *, use_cache=True):
             self.appels += 1
-            from tradeup.pricing.base import Quote
+            from tradeupfinder.pricing.base import Quote
             return Quote(market_hash_name=nom, source="steam", lowest_price=1.0,
                          median_price=1.0, volume=50, currency="EUR")
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tradeup.schedule import (
+from tradeupfinder.schedule import (
     PASSAGES,
     PREFIXE,
     equivalent_cron,
@@ -108,7 +108,7 @@ def test_le_balayage_long_est_une_tache_a_part():
     Il tourne de nuit, une seule fois -- c'est la raison d'etre de la
     separation, pas un detail d'organisation.
     """
-    from tradeup.schedule import BALAYAGE
+    from tradeupfinder.schedule import BALAYAGE
 
     noms = [t.nom for t in taches()]
     assert f"{PREFIXE}-balayage" in noms
@@ -124,3 +124,42 @@ def test_le_balayage_long_est_une_tache_a_part():
 def test_le_lanceur_du_balayage_existe():
     bal = next(t for t in taches() if t.nom.endswith("balayage"))
     assert bal.lanceur.exists(), f"lanceur manquant : {bal.lanceur}"
+
+
+# --- Renommage du projet -------------------------------------------------------
+# Les taches sont enregistrees dans Windows sous un nom qui contient le nom du
+# projet. Renommer le projet ne renomme pas les taches deja posees : elles
+# continuent de tourner, mais le code ne les reconnait plus. Il en enregistre
+# alors de nouvelles, et deux passages partent a la meme heure en se volant le
+# quota Steam -- les deux REUSSISSENT, donc aucun journal ne signale rien.
+
+
+def test_les_anciens_prefixes_sont_connus():
+    """Sans cette liste, rien ne peut retrouver les taches d'avant."""
+    from tradeupfinder.schedule import ANCIENS_PREFIXES, PREFIXE
+
+    assert PREFIXE == "tradeupfinder-quotidien"
+    assert "tradeup-quotidien" in ANCIENS_PREFIXES
+    # Un ancien prefixe egal au nouveau ferait passer les taches courantes pour
+    # des survivantes, et `--remove` les retirerait deux fois.
+    assert PREFIXE not in ANCIENS_PREFIXES
+
+
+def test_la_recherche_des_survivantes_couvre_tous_les_anciens_prefixes():
+    from tradeupfinder.schedule import ANCIENS_PREFIXES, survivantes
+
+    commande = " ".join(survivantes())
+    for prefixe in ANCIENS_PREFIXES:
+        assert f"'{prefixe}-*'" in commande, prefixe
+    # Silencieux : l'absence de tache n'est pas une erreur a remonter.
+    assert "SilentlyContinue" in commande
+
+
+def test_retirer_une_ancienne_tache_ne_demande_pas_confirmation():
+    """Le planificateur tourne sans terminal : une invite bloquerait tout."""
+    from tradeupfinder.schedule import retire_ancienne
+
+    commande = " ".join(retire_ancienne("tradeup-quotidien-matin"))
+    assert "Unregister-ScheduledTask" in commande
+    assert "-Confirm:$false" in commande
+    assert "tradeup-quotidien-matin" in commande

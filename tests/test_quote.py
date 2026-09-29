@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.pricing.base import MIN_SALES_FOR_MEDIAN, Quote
+from tradeupfinder.pricing.base import MIN_SALES_FOR_MEDIAN, Quote
 
 
 def q(low, med, vol=50):

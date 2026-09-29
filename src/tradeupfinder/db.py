@@ -20,7 +20,7 @@ class SkinDatabase:
     _by_key: dict[str, Skin]
     _by_market_name: dict[str, Skin]
     source_version: str = "unknown"
-    # Donnees brutes des caisses, lues a la demande par `tradeup.gold`. Les
+    # Donnees brutes des caisses, lues a la demande par `tradeupfinder.gold`. Les
     # golds n'appartiennent a aucune collection : ils n'ont que des caisses.
     raw_crates: tuple = ()
 

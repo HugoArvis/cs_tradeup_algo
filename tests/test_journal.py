@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from tradeup.journal import TRADE_LOCK_SECONDS, Journal
+from tradeupfinder.journal import TRADE_LOCK_SECONDS, Journal
 
 PLAN = {
     "collection": "The Bank Collection",
@@ -235,7 +235,7 @@ def test_un_contrat_porte_la_rarete_de_son_plan(tmp_path):
 
     La rarete etait deja en base, mais la requete ne la remontait pas.
     """
-    from tradeup.journal import Journal
+    from tradeupfinder.journal import Journal
 
     j = Journal(path=tmp_path / "j.db")
     plan_id = j.save_plan(

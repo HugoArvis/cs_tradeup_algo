@@ -1,10 +1,10 @@
 """Interface en ligne de commande.
 
-    tradeup db                       etat de la base statique
-    tradeup price "AK-47 | Redline (Field-Tested)"
-    tradeup scan --rarity mil-spec --collections "The Recoil Collection"
-    tradeup inspect "The Recoil Collection" --rarity mil-spec
-    tradeup cache
+    tradeupfinder db                       etat de la base statique
+    tradeupfinder price "AK-47 | Redline (Field-Tested)"
+    tradeupfinder scan --rarity mil-spec --collections "The Recoil Collection"
+    tradeupfinder inspect "The Recoil Collection" --rarity mil-spec
+    tradeupfinder cache
 """
 
 from __future__ import annotations
@@ -56,7 +56,14 @@ from .daily import (
     noms_prioritaires,
     recoter,
 )
-from .schedule import equivalent_cron, lanceur, supporte, taches
+from .schedule import (
+    equivalent_cron,
+    lanceur,
+    retire_ancienne,
+    supporte,
+    survivantes,
+    taches,
+)
 from .refresh import DEFAULT_DRIFT_THRESHOLD, collection_roles, refresh_quotes
 from .report import write_and_open
 from .scan import prefetch, required_market_names, scan
@@ -314,7 +321,7 @@ def cmd_collections(args) -> int:
         )
         noms = " ".join(f'"{c.name}"' for c in certains[:4])
         print(
-            f"  python -m tradeup.cli scan --rarity {args.rarity} "
+            f"  python -m tradeupfinder.cli scan --rarity {args.rarity} "
             f"--collections {noms} --yes"
         )
     return 0
@@ -537,7 +544,7 @@ def cmd_scan(args) -> int:
             print(
                 "Le cache ne couvre pas cette selection. Telecharge d'abord les "
                 "prix, collection par collection :\n"
-                f"  python -m tradeup.cli scan --rarity {args.rarity} "
+                f"  python -m tradeupfinder.cli scan --rarity {args.rarity} "
                 f"--collections {noms} --yes",
                 file=sys.stderr,
             )
@@ -657,7 +664,7 @@ def cmd_scan(args) -> int:
     print(
         f"\nRappel : ces chiffres sont des ESPERANCES, calcules sur un jeu de "
         f"prix fige. Recote avant d'executer :\n"
-        f"  python -m tradeup.cli verify --collection \"<collection>\" "
+        f"  python -m tradeupfinder.cli verify --collection \"<collection>\" "
         f"--rarity {args.rarity} --market {pricer.buy_source.name}",
         file=sys.stderr,
     )
@@ -680,7 +687,7 @@ def cmd_inventory(args) -> int:
                 print(
                     "Cle API CSFloat absente. Renseigne-la dans .env, ou passe "
                     "un inventaire exporte :\n"
-                    "  python -m tradeup.cli inventory --file inventaire.json",
+                    "  python -m tradeupfinder.cli inventory --file inventaire.json",
                     file=sys.stderr,
                 )
                 return 1
@@ -944,7 +951,7 @@ def cmd_verify(args) -> int:
         print(
             "Rien a verifier. Donne des noms d'objets, ou --collection pour "
             "reprendre tout un contrat :\n"
-            '  python -m tradeup.cli verify --collection "The Bank Collection" '
+            '  python -m tradeupfinder.cli verify --collection "The Bank Collection" '
             "--rarity industrial",
             file=sys.stderr,
         )
@@ -1132,6 +1139,30 @@ def cmd_daily(args) -> int:
     return 10 if passage.actionnables else 0
 
 
+def _avertit_anciennes(noms: list[str]) -> bool:
+    """Signale les taches laissees par un ancien nom de projet.
+
+    Renvoie True s'il y en a : l'appelant en fait un code de sortie non nul,
+    parce que deux passages a la meme heure se volent le quota Steam et que
+    les deux REUSSISSENT -- aucun journal ne dit que quelque chose cloche.
+    """
+    if not noms:
+        return False
+    # stderr n'est pas tamponne, stdout l'est : sans ce vidage l'avertissement
+    # sort AVANT les lignes qu'il est cense commenter, et se lit comme s'il
+    # portait sur autre chose.
+    sys.stdout.flush()
+    print()
+    print("ATTENTION : des taches d'un ancien nom de projet tournent encore.",
+          file=sys.stderr)
+    for nom in noms:
+        print(f"  {nom}", file=sys.stderr)
+    print("Elles doubleraient chaque passage et se voleraient le quota Steam. "
+          "Pour les retirer :", file=sys.stderr)
+    print("  python -m tradeupfinder.cli schedule --remove", file=sys.stderr)
+    return True
+
+
 def cmd_schedule(args) -> int:
     """Enregistre (ou retire) le passage quotidien aupres du systeme.
 
@@ -1143,6 +1174,18 @@ def cmd_schedule(args) -> int:
 
     liste = taches()
     script = lanceur()
+
+    def anciennes() -> list[str]:
+        """Taches restees sous un ancien nom de projet, s'il y en a.
+
+        Elles tournent toujours et lanceraient un SECOND passage a la meme
+        heure, chacun mangeant le quota Steam de l'autre. Les deux reussissent,
+        donc rien ne le signale : il faut aller le demander.
+        """
+        r = subprocess.run(survivantes(), capture_output=True, text=True)
+        if r.returncode != 0:
+            return []
+        return [l.strip() for l in (r.stdout or "").splitlines() if l.strip()]
 
     if not supporte():
         print("Planificateur non pilote sur ce systeme. Lignes crontab "
@@ -1160,6 +1203,13 @@ def cmd_schedule(args) -> int:
             r = subprocess.run(t.supprimer(), capture_output=True, text=True)
             etat = "retiree" if r.returncode == 0 else "absente"
             print(f"  {t.nom:<32} {etat}")
+        # Retirer sous le nouveau nom seulement laisserait tourner les taches
+        # de l'ancien : on croirait avoir tout arrete.
+        for nom in anciennes():
+            r = subprocess.run(retire_ancienne(nom), capture_output=True,
+                               text=True)
+            etat = "retiree (ancien nom)" if r.returncode == 0 else "ECHEC"
+            print(f"  {nom:<32} {etat}")
         return 0
 
     if not args.install:
@@ -1182,7 +1232,8 @@ def cmd_schedule(args) -> int:
         if not actif:
             print()
             print("Aucun passage planifie. Pour les installer :")
-            print("  python -m tradeup.cli schedule --install")
+            print("  python -m tradeupfinder.cli schedule --install")
+        _avertit_anciennes(anciennes())
         return 0
 
     echecs = 0
@@ -1202,7 +1253,9 @@ def cmd_schedule(args) -> int:
     print(f"Lanceur : {script}")
     print("Le passage tourne desormais sans terminal ouvert. Journal dans "
           "data/passages.jsonl, sortie brute dans data/passages.log.")
-    return 0
+    # C'est ICI que le doublon nait : on vient d'enregistrer sous le nouveau
+    # nom sans savoir si l'ancien tourne encore.
+    return 1 if _avertit_anciennes(anciennes()) else 0
 
 
 def cmd_sweep(args) -> int:
@@ -1368,7 +1421,7 @@ def cmd_sweep(args) -> int:
     print()
     print(f"Balayage termine en {duree:.0f} min : {faits} calculees, "
           f"{rentables} rentables, {echecs} sans resultat.")
-    print("L'interface les affiche sans recalculer : python -m tradeup.web")
+    print("L'interface les affiche sans recalculer : python -m tradeupfinder.web")
     journal.close()
     return 10 if rentables else 0
 
@@ -1505,7 +1558,7 @@ def cmd_fill(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="tradeup", description=__doc__,
+    p = argparse.ArgumentParser(prog="tradeupfinder", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--db", help="chemin de collections.json")
     p.add_argument("-v", "--verbose", action="store_true")
