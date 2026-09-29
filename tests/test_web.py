@@ -524,3 +524,37 @@ def test_un_plan_non_cote_ne_fait_pas_sauter_la_collection_suivante(app, monkeyp
 
     # Les DEUX collections doivent avoir ete tentees, pas une seule.
     assert len(batch.failed) == 2, f"file mal depilee : {batch.failed}"
+
+
+# --- Structure de la page ------------------------------------------------------
+# Un onglet dont le panneau manque n'est pas une erreur JavaScript : le clic
+# fonctionne, tous les panneaux se ferment, et l'ecran reste vide. Rien ne le
+# signale. L'inverse -- un panneau sans onglet -- est du code mort inatteignable.
+
+
+def test_chaque_onglet_a_son_panneau_et_reciproquement():
+    import re
+
+    from tradeup.web import PAGE
+
+    onglets = set(re.findall(r'data-pane="(\w+)"', PAGE))
+    panneaux = set(re.findall(r'id="pane-(\w+)"', PAGE))
+    assert onglets == panneaux, (
+        f"onglets sans panneau : {sorted(onglets - panneaux)} ; "
+        f"panneaux sans onglet : {sorted(panneaux - onglets)}"
+    )
+
+
+def test_les_ordres_dachat_vivent_dans_la_carte_pas_dans_un_onglet():
+    """Un panier d'annonces ne se repete pas, un ordre d'achat si : les deux
+    voies doivent donc se lire au meme endroit, sur le contrat. L'onglet separe
+    refaisait tout le calcul et obligeait a comparer de tete."""
+    from tradeup.web import PAGE
+
+    assert "pane-ordres" not in PAGE
+    assert "/api/orders" not in PAGE
+    # Le rendu des ordres est bien dans la carte.
+    assert "function detailOrdres(" in PAGE
+    # Et il n'y a plus qu'UN tableau de prix, non deux qui se recouvrent.
+    assert "function voies(" in PAGE
+    assert "function comparatif(" not in PAGE and "function deuxVoies(" not in PAGE

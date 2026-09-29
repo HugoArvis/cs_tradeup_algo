@@ -382,6 +382,12 @@ class Plan:
     # ne tient QUE grace a l'ecart entre les deux marches.
     alt_cost: float | None = None
 
+    # Prix unitaire de chaque entree sur le marche de revente, par nom. Meme
+    # cotation que `alt_cost`, conservee au lieu d'etre sommee puis jetee :
+    # c'est ce qui permet de donner un PRIX D'ORDRE par objet plutot qu'un
+    # budget global. Un ordre d'achat se place sur un objet a un prix.
+    alt_prices: dict[str, float] | None = None
+
     # Cout du MEME panier si les `PROFONDEUR_TESTEE` annonces les moins cheres
     # de chaque objet ont ete achetees avant vous. None si le panier devient
     # impossible a composer.
@@ -477,6 +483,49 @@ class Plan:
         if budget is None or not self.alt_cost:
             return None
         return 1.0 - budget / self.alt_cost
+
+    def steam_order_lines(
+        self, target_roi: float = 0.20
+    ) -> tuple[dict, ...] | None:
+        """Le prix d'ordre a placer sur CHAQUE objet, pas seulement le budget.
+
+        Un budget total ne se place pas : on pose un ordre par objet, a un
+        prix. Le budget est reparti proportionnellement aux prix du marche --
+        le meme rabais partout --, comme le fait `orders.plan_orders`. Repartir
+        autrement supposerait de savoir sur quels objets les vendeurs cedent le
+        plus, ce qu'aucune donnee ici ne dit.
+
+        Aucun appel reseau : les prix Steam sont deja dans `alt_prices`.
+        """
+        from .orders import STEAM_MIN_PRICE
+
+        budget = self.steam_order_budget(target_roi)
+        if budget is None or not self.alt_cost or not self.alt_prices:
+            return None
+        facteur = budget / self.alt_cost
+
+        besoins: dict[str, int] = {}
+        for o in self.options:
+            besoins[o.name] = besoins.get(o.name, 0) + 1
+
+        lignes = []
+        for nom, qte in besoins.items():
+            marche = self.alt_prices.get(nom)
+            if marche is None:
+                return None
+            # Arrondi vers le BAS au centime : arrondir vers le haut
+            # depasserait le budget et mangerait la marge visee.
+            ordre = int(marche * facteur * 100) / 100
+            lignes.append({
+                "name": nom,
+                "quantity": qte,
+                "market_price": marche,
+                "order_price": ordre,
+                # Un ordre sous le plancher de Steam ne sera jamais servi :
+                # aucun rabais ne peut sauver la ligne.
+                "below_floor": ordre < STEAM_MIN_PRICE,
+            })
+        return tuple(lignes)
 
     @property
     def alt_profitability(self) -> float | None:
@@ -694,11 +743,12 @@ def build_plan(
     if meilleur is not None:
         from dataclasses import replace
 
-        alt = (_cout_ailleurs(sell_source, meilleur.options, sell_to_usd)
-               if sell_source is not None else None)
+        ailleurs = (_cout_ailleurs(sell_source, meilleur.options, sell_to_usd)
+                    if sell_source is not None else None)
         meilleur = replace(
             meilleur,
-            alt_cost=alt,
+            alt_cost=ailleurs[0] if ailleurs else None,
+            alt_prices=ailleurs[1] if ailleurs else None,
             deep_cost=_cout_en_profondeur(toutes, meilleur),
         )
     return meilleur
@@ -736,19 +786,25 @@ def _cout_en_profondeur(toutes, plan) -> float | None:
 
 def _cout_ailleurs(
     source: PriceSource, options, vers_usd: float
-) -> float | None:
+) -> tuple[float, dict[str, float]] | None:
     """Ce que couterait le MEME panier sur le marche de revente.
 
     Une cotation par nom distinct, pas par exemplaire : sur Steam le prix ne
     depend que du palier d'usure. Si un seul prix manque, on renvoie None
     plutot qu'un total partiel -- un cout incomplet compare a un cout complet
     donnerait un ecart inventé.
+
+    Renvoie le total ET le prix unitaire par nom. Le detail coute zero appel
+    de plus -- il est deja en main -- et c'est lui qui permet de deduire un
+    PRIX D'ORDRE par objet : un ordre se place sur un objet a un prix, pas sur
+    un panier a un total.
     """
     besoins: dict[str, int] = {}
     for o in options:
         besoins[o.name] = besoins.get(o.name, 0) + 1
 
     total = 0.0
+    unitaires: dict[str, float] = {}
     for nom, qte in besoins.items():
         try:
             q = source.fetch(nom)
@@ -759,8 +815,9 @@ def _cout_ailleurs(
         prix = q.buy_reference()
         if prix is None:
             return None
-        total += qte * prix * vers_usd
-    return total
+        unitaires[nom] = prix * vers_usd
+        total += qte * unitaires[nom]
+    return total, unitaires
 
 
 def _valeur_de_revente(
@@ -938,3 +995,105 @@ def _net_si_palier_rate(result: TradeUpResult, pricer: CSFloatPricer) -> float |
             total += outcome.probability * net
             connu = True
     return total if connu else None
+
+
+def plan_payload(plan: Plan, devise: str, conv=None) -> dict:
+    """Serialise un plan pour le journal et pour l'interface.
+
+    Il y en avait DEUX -- un dans `cli.py`, un dans `web.py` -- qui divergeaient
+    champ par champ : `order_lines` aurait du etre ajoute aux deux, et un champ
+    oublie d'un cote laisse un trou dans l'affichage sans erreur. Un seul
+    producteur, une seule liste de champs.
+
+    Le calcul se fait en USD de bout en bout -- CSFloat y cote, la revente
+    Steam y est ramenee par `sell_to_usd`. La conversion vers la devise du
+    compte n'a lieu QU'ICI, une seule fois : convertir en cours de route
+    multiplierait les occasions de melanger les deux devises.
+    """
+    from .orders import STEAM_MIN_PRICE
+
+    r = plan.result
+    c = conv if conv is not None else (lambda v: round(v, 4))
+
+    def opt(valeur):
+        """Convertit, ou laisse None -- un None converti vaut 0, qui est faux."""
+        return None if valeur is None else c(valeur)
+
+    def arrondi(valeur):
+        return None if valeur is None else round(valeur, 4)
+
+    lignes = plan.steam_order_lines()
+    return {
+        "collection": plan.collection.name,
+        # Une meme collection donne un plan different par rarete : sans elle,
+        # deux lignes de l'historique sont indiscernables.
+        "rarity": plan.rarity.label,
+        "rarity_target": plan.rarity.next_up.label,
+        "currency": devise,
+        # Les entrees sont achetees sur CSFloat, la revente estimee sur Steam.
+        # Sans le dire, on verifie un prix d'entree sur Steam et on conclut a
+        # une erreur : mesure sur le M4A4 | Zubastick (WW), 0,07 EUR sur
+        # CSFloat contre 0,11 sur Steam. Les deux chiffres sont justes.
+        "buy_market": "CSFloat",
+        "sell_market": "Steam",
+        "cost": c(r.cost),
+        "net": c(r.ev_net),
+        "profit": c(r.ev_profit),
+        "roi": round(r.roi, 4),
+        # Convention des guides : 1.0 = point mort, pas le profit.
+        "profitability": round(r.profitability, 4),
+        "win_probability": round(r.profit_probability, 4),
+        "outcomes_count": r.distinct_outcomes,
+        "stdev": c(r.stdev),
+        "avg_float": round(r.avg_input_float, 5),
+        "listings_examined": plan.listings_examined,
+        "float_slack": round(plan.float_slack, 5),
+        # Le meme panier achete sur Steam : dit si le contrat ne tient QUE
+        # grace a l'ecart entre les deux marches.
+        "cost_alt": opt(plan.alt_cost),
+        "profitability_alt": arrondi(plan.alt_profitability),
+        # Le meme panier si trois annonces par objet sont prises avant nous :
+        # separe une occasion d'une course.
+        "cost_deep": opt(plan.deep_cost),
+        "profitability_deep": arrondi(plan.deep_profitability),
+        "fragile": plan.fragile,
+        # La voie ORDRE STEAM : repetable, float subi.
+        "float_subi_ok": plan.float_subi_compatible,
+        "order_budget": opt(plan.steam_order_budget()),
+        "order_discount": arrondi(plan.steam_order_discount()),
+        # Le prix d'ordre OBJET PAR OBJET. Un budget total ne se place pas :
+        # on pose un ordre par objet, a un prix. Sans ce detail, les ordres
+        # devaient vivre dans un onglet separe qui refaisait tout le calcul.
+        #
+        # Le plancher de Steam vaut dans la devise du COMPTE, pas en USD ou le
+        # calcul se fait : `below_floor` se rejuge donc apres conversion.
+        "order_lines": None if lignes is None else [
+            {
+                "name": ligne["name"],
+                "quantity": ligne["quantity"],
+                "market_price": c(ligne["market_price"]),
+                "order_price": c(ligne["order_price"]),
+                "below_floor": c(ligne["order_price"]) < STEAM_MIN_PRICE,
+            }
+            for ligne in lignes
+        ],
+        "worst_profit": opt(plan.worst_profit),
+        "best_profit": opt(plan.best_profit),
+        "all_profitable": plan.all_outcomes_profitable,
+        "replis": plan.replis,
+        "downgrade_profit": opt(plan.downgrade_profit),
+        "exit_loss": opt(plan.exit_loss),
+        "exit_loss_ratio": arrondi(plan.exit_loss_ratio),
+        "price_drop_tolerance": arrondi(plan.price_drop_tolerance),
+        "inputs": [
+            {"name": o.name, "float": round(o.float_value, 4),
+             "price": c(o.unit_cost), "url": o.url}
+            for o in sorted(plan.options,
+                            key=lambda o: (o.skin.name, o.float_value))
+        ],
+        "outcomes": [
+            {"name": o.name, "probability": round(o.probability, 4),
+             "float": round(o.float_value, 4), "net": c(o.net_value)}
+            for o in r.outcomes
+        ],
+    }

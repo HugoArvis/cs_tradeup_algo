@@ -42,9 +42,8 @@ from .inventory import (
 from .journal import Journal
 from .models import Rarity
 from .fees import STEAM
-from .plan import CSFloatPricer, Plan, build_plan
+from .plan import CSFloatPricer, Plan, build_plan, plan_payload
 from .pricing.cache import QuoteCache
-from .pricing.repository import MarketPricer
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
 from .pricing.steam import SteamMarket
@@ -210,72 +209,6 @@ class App:
                     self.currency = devise
         except Exception:  # noqa: BLE001 - la conversion est un confort
             log.warning("Devise du compte indisponible, affichage en USD")
-
-    def ordres(self, rarity_name: str, *, target_roi: float = 0.20) -> dict:
-        """Les ORDRES D'ACHAT a placer, plutot que des annonces a cliquer.
-
-        Un panier d'annonces ne se repete pas : chaque annonce est unique, et
-        le lendemain il faut tout rechercher. Un ordre d'achat, lui, se pose
-        une fois et se remplit tout seul -- c'est la seule forme exploitable
-        quand on veut refaire le meme contrat.
-
-        Lu sur le CACHE : aucune requete, donc reponse immediate. Les prix
-        viennent du balayage de nuit, et leur age est renvoye pour que
-        l'interface puisse le dire.
-        """
-        from .orders import scan_orders
-
-        # Sans ca, `self.currency` vaut son defaut "USD" tant que le compte
-        # n'a pas repondu -- et le cache, indexe par devise, ne rend alors
-        # AUCUNE cotation. Zero ordre, sans la moindre erreur.
-        self.load_currency()
-        rarity = RARITES[rarity_name]
-        cache = QuoteCache(ttl_seconds=720 * 3600)
-        steam = SteamMarket(currency=self.currency, cache=cache, offline=True,
-                            ttl_seconds=720 * 3600)
-        pricer = MarketPricer(steam, steam, buy_fees="steam", sell_fees="steam",
-                              safety_margin=0.05, min_input_volume=3,
-                              price_basis="sales")
-        try:
-            plans = scan_orders(self.db, rarity, pricer, target_roi=target_roi)
-        finally:
-            ages = pricer.quote_age()
-            cache.close()
-
-        return {
-            # Le marche est celui ou l'ordre se PLACE. Steam est le seul des
-            # deux a accepter un ordre sur une usure sans choisir le float --
-            # et c'est precisement ce que la strategie repetable demande.
-            "market": "Steam Community Market",
-            "currency": self.currency,
-            "target_roi": target_roi,
-            "age_hours": round(ages[0] / 3600, 1) if ages else None,
-            "plans": [
-                {
-                    "collection": p.collection.name,
-                    "rarity": p.rarity.label,
-                    "rarity_target": p.rarity.next_up.label,
-                    "ev_net": round(p.ev_net, 2),
-                    "market_cost": round(p.market_cost, 2),
-                    "budget": round(p.budget, 2),
-                    "discount": round(p.discount, 4),
-                    "feasible": p.feasible(),
-                    "win_probability": round(p.result.profit_probability, 4),
-                    "outcomes": p.result.distinct_outcomes,
-                    "lines": [
-                        {
-                            "name": l.name, "quantity": l.quantity,
-                            "market_price": round(l.market_price, 2),
-                            "order_price": round(l.order_price, 2),
-                            "discount": round(l.discount, 4),
-                            "below_floor": l.below_floor,
-                        }
-                        for l in p.lines
-                    ],
-                }
-                for p in plans
-            ],
-        }
 
     def revente(self) -> SteamMarket:
         """Marche de revente des sorties, partage par tous les calculs.
@@ -654,83 +587,12 @@ class App:
         return base
 
     def _plan_dict(self, plan: Plan) -> dict:
-        """Serialise un plan, montants convertis dans la devise du compte."""
-        p, r = plan, plan.result
-        return {
-            "collection": p.collection.name,
-            # Une meme collection donne un plan different par rarete : sans
-            # elle, deux lignes de l'historique sont indiscernables.
-            "rarity": p.rarity.label,
-            "rarity_target": p.rarity.next_up.label,
-            "currency": self.currency,
-            "cost": self.conv(r.cost),
-            "net": self.conv(r.ev_net),
-            "profit": self.conv(r.ev_profit),
-            "roi": round(r.roi, 4),
-            # Convention des guides : 1.0 = point mort, pas le profit.
-            "profitability": round(r.profitability, 4),
-            "win_probability": round(r.profit_probability, 4),
-            "outcomes_count": r.distinct_outcomes,
-            "stdev": self.conv(r.stdev),
-            "avg_float": round(r.avg_input_float, 5),
-            "listings_examined": p.listings_examined,
-            "float_slack": round(p.float_slack, 5),
-            "downgrade_profit": (
-                self.conv(p.downgrade_profit) if p.downgrade_profit is not None else None
-            ),
-            "worst_profit": (
-                self.conv(p.worst_profit) if p.worst_profit is not None else None
-            ),
-            "best_profit": (
-                self.conv(p.best_profit) if p.best_profit is not None else None
-            ),
-            "all_profitable": p.all_outcomes_profitable,
-            "replis": p.replis,
-            "buy_market": "CSFloat",
-            "sell_market": "Steam",
-            "cost_alt": (self.conv(p.alt_cost) if p.alt_cost is not None else None),
-            "profitability_alt": (round(p.alt_profitability, 4)
-                                  if p.alt_profitability is not None else None),
-            "cost_deep": (self.conv(p.deep_cost)
-                          if p.deep_cost is not None else None),
-            "profitability_deep": (round(p.deep_profitability, 4)
-                                   if p.deep_profitability is not None else None),
-            "fragile": p.fragile,
-            "float_subi_ok": p.float_subi_compatible,
-            "order_budget": (self.conv(p.steam_order_budget())
-                             if p.steam_order_budget() is not None else None),
-            "order_discount": (round(p.steam_order_discount(), 4)
-                               if p.steam_order_discount() is not None else None),
-            "exit_loss": (
-                self.conv(p.exit_loss) if p.exit_loss is not None else None
-            ),
-            "exit_loss_ratio": (
-                round(p.exit_loss_ratio, 4) if p.exit_loss_ratio is not None else None
-            ),
-            "price_drop_tolerance": (
-                round(p.price_drop_tolerance, 4)
-                if p.price_drop_tolerance is not None
-                else None
-            ),
-            "inputs": [
-                {
-                    "name": o.name,
-                    "float": round(o.float_value, 4),
-                    "price": self.conv(o.unit_cost),
-                    "url": o.url,
-                }
-                for o in sorted(p.options, key=lambda o: (o.skin.name, o.float_value))
-            ],
-            "outcomes": [
-                {
-                    "name": o.name,
-                    "probability": round(o.probability, 4),
-                    "float": round(o.float_value, 4),
-                    "net": self.conv(o.net_value),
-                }
-                for o in r.outcomes
-            ],
-        }
+        """Serialise un plan, montants convertis dans la devise du compte.
+
+        Le contenu vit dans `plan.plan_payload` : il y avait deux serialiseurs,
+        un ici et un dans `cli.py`, qui divergeaient champ par champ.
+        """
+        return plan_payload(plan, self.currency, self.conv)
 
     def contract_payload(self, c) -> dict:
         """Etat d'un contrat : le REEL confronte a ce qui etait prevu.
@@ -860,15 +722,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "calcul inconnu"}, 404)
                 return
             self._json(self.app.inventory_job_payload(job))
-        elif route.path == "/api/orders":
-            rarity = (params.get("rarity") or ["industrial"])[0]
-            if rarity not in RARITES:
-                self._json({"error": "rarete inconnue"}, 400)
-                return
-            try:
-                self._json(self.app.ordres(rarity))
-            except Exception as exc:  # noqa: BLE001
-                self._json({"error": str(exc)}, 500)
         elif route.path == "/api/latest":
             # Ce que la nuit a trouve. Aucune requete, aucune attente : un
             # balayage complet dure plus d'une heure, il n'a pas a etre refait
@@ -1077,6 +930,13 @@ tr.done td{opacity:.55}
 .bar>i{display:block;height:100%;background:var(--accent)}
 .tag{display:inline-block;padding:1px 7px;border-radius:20px;font-size:12px;
 background:var(--warn-bg);color:var(--warn);font-weight:600}
+/* Une bonne nouvelle ne merite pas un bandeau : un bandeau se lit comme une
+   alerte, et trois bandeaux d'affilee ne se lisent plus du tout. Le detail
+   passe en `title`, disponible sans occuper la page. */
+.tag.ok{background:transparent;color:var(--pos);border:1px solid var(--pos)}
+.tag[title]{cursor:help}
+.marques{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+.marques:empty{display:none}
 .kpis{display:flex;gap:20px;flex-wrap:wrap}
 .kpi{flex:1 1 120px}
 .kpi .lab{color:var(--muted);font-size:12px;text-transform:uppercase}
@@ -1125,9 +985,7 @@ vertical-align:-2px;margin-right:7px}
 
 <div class="tabs">
   <div class="tab on" data-pane="calcul">Calculer</div>
-  <div class="tab" data-pane="ordres">Ordres d’achat</div>
   <div class="tab" data-pane="inventaire">Mon inventaire</div>
-  <div class="tab" data-pane="histo">Historique des plans</div>
   <div class="tab" data-pane="contrats">Mes contrats</div>
 </div>
 
@@ -1153,31 +1011,6 @@ vertical-align:-2px;margin-right:7px}
   </div>
   <div id="avancement"></div>
   <div id="resultats"></div>
-</div>
-
-<div class="pane" id="pane-ordres">
-  <div class="card">
-    <p class="muted">Un panier d’annonces ne se répète pas : chaque annonce est
-    unique, et le lendemain il faut tout rechercher. Un <b>ordre d’achat</b> se
-    pose une fois et se remplit tout seul — c’est la forme exploitable quand on
-    veut <b>refaire</b> le même contrat. Le calcul est renversé : au lieu de
-    partir du prix du marché, il déduit le <b>prix maximal</b> que chaque entrée
-    peut coûter pour que le contrat tienne.</p>
-    <div class="row">
-      <label>Rareté d’entrée
-        <select id="ord-rarity">
-          <option value="consumer">Consumer</option>
-          <option value="industrial" selected>Industrial</option>
-          <option value="mil-spec">Mil-Spec</option>
-          <option value="restricted">Restricted</option>
-          <option value="classified">Classified</option>
-        </select>
-      </label>
-      <button class="ghost" id="ord-relire">Relire</button>
-      <span class="muted">lecture du cache : instantané, aucune requête</span>
-    </div>
-  </div>
-  <div id="ord-sortie"></div>
 </div>
 
 <div class="pane" id="pane-inventaire">
@@ -1216,11 +1049,20 @@ vertical-align:-2px;margin-right:7px}
   <div id="inv-sortie"></div>
 </div>
 
-<div class="pane" id="pane-histo">
+<div class="pane" id="pane-contrats">
   <div class="card">
-    <p class="muted">Tout plan calcule est conserve ici : il a coute des requetes,
-    autant pouvoir le retrouver. &laquo;&nbsp;Suivre&nbsp;&raquo; en fait un contrat
-    auquel rattacher vos achats reels.</p>
+    <div class="row">
+      <label><input type="checkbox" id="tous"> afficher aussi les contrats
+        termines</label>
+      <button class="ghost sm" id="rafraichir">Rafraichir</button>
+    </div>
+  </div>
+  <div id="contrats"></div>
+  <div class="card">
+    <div class="etape">Plans calcules</div>
+    <p class="muted">Tout plan calcule est conserve : il a coute des requetes.
+    &laquo;&nbsp;Suivre&nbsp;&raquo; en fait un contrat auquel rattacher vos
+    achats reels.</p>
     <div class="scroll"><table>
       <thead><tr><th>Date</th><th>Collection</th><th class="num">Cout</th>
         <th class="num">Profit</th><th class="num">Rendement</th>
@@ -1228,14 +1070,6 @@ vertical-align:-2px;margin-right:7px}
       <tbody id="histo"></tbody>
     </table></div>
   </div>
-</div>
-
-<div class="pane" id="pane-contrats">
-  <div class="row">
-    <label><input type="checkbox" id="tous"> afficher aussi les contrats termines</label>
-    <button class="ghost sm" id="rafraichir">Rafraichir</button>
-  </div>
-  <div id="contrats"></div>
 </div>
 </div>
 
@@ -1295,81 +1129,69 @@ async function charger() {
 // forme deux fois.
 
 function carte(p, planId, archive) {
-  const bloc = [];
+  const alertes = [];
 
-  if (archive) bloc.push(`<div class="warn"><b>Plan archivé.</b> Ces valeurs
-    sont figées au moment du calcul : les annonces ont pu partir et les prix
-    bouger. Relancez une recherche avant d’acheter.</div>`);
+  if (archive) alertes.push(`<div class="warn"><b>Plan archivé.</b> Valeurs
+    figées au calcul : les annonces ont pu partir. Relancez avant d’acheter.</div>`);
 
-  if (p.replis) {
-    bloc.push(`<div class="warn"><b>Valorisation prudente.</b>
-      ${p.replis} sortie(s) n’avaient pas de prix Steam et ont été valorisées
-      sur CSFloat, qui rend <b>17 à 37 % de moins</b>. Le gain réel sera donc
-      supérieur à celui affiché — jamais inférieur de ce fait.</div>`);
+  if (p.fragile) {
+    alertes.push(`<div class="warn"><b>Contrat fragile.</b> Il ne tient qu’en
+      arrivant premier : dès que quelques annonces sont prises il passe sous le
+      point mort. Les annonces retenues sont les moins chères, donc les
+      premières achetées par quiconque fait le même calcul.</div>`);
   }
+  if (!p.all_profitable && p.worst_profit !== null &&
+      p.worst_profit !== undefined) {
+    alertes.push(`<div class="warn"><b>Le tirage peut vous faire perdre :</b>
+      de <span class="neg">${p.worst_profit.toFixed(2)}</span> à
+      <span class="pos">+${(p.best_profit || 0).toFixed(2)}</span> selon la
+      sortie.</div>`);
+  }
+
+  // Les bonnes nouvelles ne prennent plus un bandeau : un bandeau se lit comme
+  // une alerte, et trois bandeaux d'affilee ne se lisent plus du tout.
+  const marques = [];
   if (p.all_profitable) {
-    bloc.push(`<div class="warn ok"><b>Toutes les sorties sont rentables.</b>
-      Quel que soit le skin obtenu vous gagnez, entre
-      <b>+${(p.worst_profit || 0).toFixed(2)}</b> et
-      <b>+${(p.best_profit || 0).toFixed(2)}</b>. Seule une chute des prix peut
-      vous faire perdre, pas le tirage.</div>`);
-  } else if (p.worst_profit !== null && p.worst_profit !== undefined) {
-    bloc.push(`<div class="warn"><b>Le tirage peut vous faire perdre.</b>
-      Selon la sortie obtenue, le résultat va de
-      <span class="neg">${p.worst_profit.toFixed(2)}</span> à
-      <span class="pos">+${(p.best_profit || 0).toFixed(2)}</span>.</div>`);
+    marques.push(`<span class="tag ok" title="Quel que soit le skin obtenu vous
+      gagnez, entre +${(p.worst_profit || 0).toFixed(2)} et
+      +${(p.best_profit || 0).toFixed(2)}. Seule une chute des prix peut vous
+      faire perdre, pas le tirage.">toutes les sorties rentables</span>`);
   }
-
-  const lignes = p.inputs.map(i => `<tr>
-    <td>${i.name}</td>
-    <td class="num">${i.float.toFixed(4)}</td>
-    <td class="num">${i.price.toFixed(2)}</td>
-    <td>${i.url ? `<a class="buy" href="${i.url}" target="_blank">Acheter</a>`
-      : '<span class="muted">annonce non identifiée</span>'}</td></tr>`).join('');
+  if (p.replis) {
+    marques.push(`<span class="tag" title="${p.replis} sortie(s) sans prix
+      Steam, valorisées sur CSFloat qui rend 17 à 37 % de moins. Le gain réel
+      sera supérieur à l’affiché, jamais inférieur de ce fait.">estimation
+      prudente</span>`);
+  }
 
   return `<div class="card">
     <div class="tete">
       <div>
         <h2>${p.collection} <span class="tag">${p.rarity}</span></h2>
-        <div class="muted">10 entrées ${p.rarity} → 1 sortie ${p.rarity_target}</div>
+        <div class="muted">10 entrées ${p.rarity} → 1 sortie
+          ${p.rarity_target}</div>
+        <div class="marques">${marques.join(' ')}</div>
       </div>
       <div style="text-align:right">
         <div class="gros prof">${profTexte(p.profitability)}</div>
         ${jauge(p.profitability)}
-        <div class="muted">profitabilité — 100 % = point mort</div>
+        <div class="muted">100 % = point mort</div>
       </div>
     </div>
     <div class="chiffres">
-      <span>coût sur ${p.buy_market || 'CSFloat'} <b>${p.cost.toFixed(2)}</b></span>
-      <span>revente nette attendue <b>${p.net.toFixed(2)}</b></span>
+      <span>coût <b>${p.cost.toFixed(2)}</b></span>
+      <span>revente nette <b>${p.net.toFixed(2)}</b></span>
       <span>gain <b class="pos">+${p.profit.toFixed(2)}</b></span>
-      <span>chances de gagner <b>${((p.win_probability || 0) * 100).toFixed(0)}%</b></span>
+      <span>chances de gagner
+        <b>${((p.win_probability || 0) * 100).toFixed(0)}%</b></span>
     </div>
-    ${comparatif(p)}
-    ${deuxVoies(p)}
-    ${bloc.join('')}
-    <div class="etape">Méthode d’achat — sur ${p.buy_market || 'CSFloat'}</div>
-    <p class="muted"><b>Les prix ci-dessous sont ceux de
-    ${p.buy_market || 'CSFloat'}, pas de Steam</b>, où le même objet coûte
-    généralement plus cher. La revente est estimée sur
-    ${p.sell_market || 'Steam'}. Ces dix annonces sont précises : le float de
-    chacune décide de l’usure en sortie, donc n’en remplacez aucune par un
-    exemplaire moins cher.</p>
-    <p class="muted"><b>Une annonce est unique et publique.</b> Celles-ci
-    peuvent avoir été achetées depuis le calcul — mesuré sur un contrat de
-    15 h d’âge, les cinq entrées annoncées à 0,06 valaient 0,08 à 0,19 le
-    lendemain. Recotez avant d’acheter.</p>
-    <div class="scroll"><table>
-      <thead><tr><th>Objet</th><th class="num">Float</th>
-        <th class="num">Prix</th><th></th></tr></thead>
-      <tbody>${lignes}</tbody>
-    </table></div>
-    <p class="muted">Moyenne de float ${p.avg_float.toFixed(4)} sur
-    ${p.listings_examined} annonces examinées. Achetez les dix d’un coup : le
-    verrou de 7 jours part à la réception de chaque objet, et le contrat ne
-    peut se faire qu’une fois le dernier libéré.</p>
+    ${voies(p)}
+    ${alertes.join('')}
+    ${detailAnnonces(p)}
+    ${detailOrdres(p)}
     <details>
-      <summary>Ce que le contrat peut sortir</summary>
+      <summary>Ce que le contrat peut sortir
+        (${p.outcomes.length} issue${p.outcomes.length > 1 ? 's' : ''})</summary>
       <div class="scroll"><table>
         <thead><tr><th>Skin</th><th class="num">Probabilité</th>
           <th class="num">Float</th><th class="num">Revente nette</th></tr></thead>
@@ -1383,6 +1205,133 @@ function carte(p, planId, archive) {
       <button class="sm" data-follow="${planId}">Suivre ce contrat</button>
     </div>
   </div>`;
+}
+
+// Les DEUX voies d'approvisionnement dans UN tableau. Il y en avait deux qui se
+// recouvraient : `comparatif` (CSFloat / sans arriver premier / Steam) et
+// `deuxVoies` (CSFloat / ordre Steam). Quatre lignes de prix a lire pour une
+// seule question -- ou acheter, et ce que ca coute.
+//
+// Ce qui tranche n'est pas le prix mais le FLOAT : un ordre d'achat porte sur
+// une usure, pas sur une qualite. Si les sorties changent de palier quand le
+// float est subi, la voie Steam est simplement fermee.
+function voies(p) {
+  const achat = p.buy_market || 'CSFloat';
+  const revente = p.sell_market || 'Steam';
+  const lignes = [];
+
+  lignes.push(`<tr><td><b>${achat}</b>, ces 10 annonces</td>
+    <td class="num">${p.cost.toFixed(2)}</td>
+    <td class="num prof">${profTexte(p.profitability)}</td>
+    <td class="muted">float choisi, disponible tout de suite ·
+      <b>verrou 7 jours</b> · non répétable</td></tr>`);
+
+  if (p.float_subi_ok === false) {
+    lignes.push(`<tr><td><b>Ordre d’achat ${revente}</b></td>
+      <td class="num neg">impossible</td><td class="num">—</td>
+      <td class="muted">le float est subi et les sorties changeraient de
+        palier : ce contrat exige de choisir les floats</td></tr>`);
+  } else if (p.order_budget === null || p.order_budget === undefined) {
+    lignes.push(`<tr><td><b>Ordre d’achat ${revente}</b></td>
+      <td class="num">—</td><td class="num">—</td>
+      <td class="muted">prix ${revente} indisponible</td></tr>`);
+  } else {
+    lignes.push(`<tr><td><b>Ordre d’achat ${revente}</b>
+      ${p.order_discount === null || p.order_discount === undefined ? ''
+        : `à −${Math.round(p.order_discount * 100)} %`}</td>
+      <td class="num">${p.order_budget.toFixed(2)}</td>
+      <td class="num prof">visé</td>
+      <td class="muted">float <b>subi</b> · <b>répétable</b>, l’ordre se pose
+        une fois · sans verrou</td></tr>`);
+  }
+
+  if (p.cost_alt === null || p.cost_alt === undefined) {
+    lignes.push(`<tr><td>${revente} au prix affiché</td>
+      <td class="num">—</td><td class="num">—</td>
+      <td class="muted">un prix manquait</td></tr>`);
+  } else {
+    const ecart = (p.cost_alt - p.cost) / p.cost;
+    const profAlt = p.profitability_alt || 0;
+    const tient = profAlt >= SEUIL_PROFITABLE;
+    lignes.push(`<tr><td>${revente} au prix affiché</td>
+      <td class="num">${p.cost_alt.toFixed(2)}
+        <span class="muted">${ecart >= 0 ? '+' : ''}${Math.round(ecart * 100)} %</span></td>
+      <td class="num ${tient ? 'prof' : 'neg'}">${profTexte(profAlt)}</td>
+      <td class="muted">${tient ? 'sans verrou, mais float subi'
+        : 'sous le point mort — l’écart entre les deux marchés EST la marge'}</td>
+      </tr>`);
+  }
+
+  return `<div class="etape">Comment acheter les 10 entrées</div>
+    <div class="scroll"><table>
+      <thead><tr><th>voie</th><th class="num">coût des 10</th>
+        <th class="num">profitabilité</th><th>ce que ça implique</th></tr></thead>
+      <tbody>${lignes.join('')}</tbody>
+    </table></div>`;
+}
+
+// Les annonces precises. Repliees : ce sont dix lignes qui n'ont d'interet
+// qu'au moment d'acheter, et elles repoussaient tout le reste hors de l'ecran.
+function detailAnnonces(p) {
+  const achat = p.buy_market || 'CSFloat';
+  return `<details>
+    <summary>Acheter maintenant sur ${achat} — les 10 annonces
+      (${p.cost.toFixed(2)})</summary>
+    <p class="muted">Prix ${achat}, pas ${p.sell_market || 'Steam'}. Ces
+    annonces sont <b>uniques et périssables</b> : n’en remplacez aucune par un
+    exemplaire moins cher, le float de chacune décide de l’usure en sortie.
+    Achetez les dix d’un coup — le verrou de 7 jours part à la réception de
+    chaque objet.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Objet</th><th class="num">Float</th>
+        <th class="num">Prix</th><th></th></tr></thead>
+      <tbody>${p.inputs.map(i => `<tr>
+        <td>${i.name}</td>
+        <td class="num">${i.float.toFixed(4)}</td>
+        <td class="num">${i.price.toFixed(2)}</td>
+        <td>${i.url ? `<a class="buy" href="${i.url}" target="_blank">Acheter</a>`
+          : '<span class="muted">annonce non identifiée</span>'}</td></tr>`).join('')}
+      </tbody>
+    </table></div>
+    <p class="muted">Float moyen ${p.avg_float.toFixed(4)} sur
+    ${p.listings_examined} annonces examinées.</p>
+  </details>`;
+}
+
+// Les ordres a placer, objet par objet. C'etait un ONGLET separe qui refaisait
+// tout le calcul : un panier d'annonces ne se repete pas, un ordre si, donc les
+// deux voies doivent se lire au meme endroit -- sur le contrat.
+function detailOrdres(p) {
+  if (!p.order_lines || !p.order_lines.length) return '';
+  // Si le float subi ferait changer les sorties de palier, cette voie est
+  // fermee -- et le tableau ci-dessus le dit. Proposer quand meme les prix
+  // d'ordre contredirait la ligne juste au-dessus.
+  if (p.float_subi_ok === false) return '';
+  const revente = p.sell_market || 'Steam';
+  const bloques = p.order_lines.filter(l => l.below_floor).length;
+  return `<details>
+    <summary>Placer des ordres sur ${revente} — les 10 prix
+      (${(p.order_budget || 0).toFixed(2)})</summary>
+    <p class="muted">Le <b>float sera tiré au hasard</b> dans le palier : un
+    ordre porte sur une usure, pas sur une qualité. C’est le prix qu’on choisit.
+    En échange, l’ordre se pose une fois, se remplit seul, et les objets sont
+    échangeables tout de suite.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Objet</th><th class="num">Qté</th>
+        <th class="num">Prix ${revente}</th><th class="num">Ordre à placer</th>
+        </tr></thead>
+      <tbody>${p.order_lines.map(l => `<tr>
+        <td>${l.name}${l.below_floor
+          ? ' <span class="tag">sous le plancher</span>' : ''}</td>
+        <td class="num">${l.quantity}</td>
+        <td class="num">${l.market_price.toFixed(2)}</td>
+        <td class="num prof">${l.order_price.toFixed(2)}</td></tr>`).join('')}
+      </tbody>
+    </table></div>
+    ${bloques ? `<p class="muted"><b>${bloques} ligne(s) sous le plancher de
+      0,03 de ${revente}</b> : aucun rabais ne peut les sauver, l’ordre ne
+      serait jamais servi.</p>` : ''}
+  </details>`;
 }
 
 // --- Ce que la nuit a trouve ------------------------------------------------
@@ -1425,169 +1374,6 @@ async function dernierBalayage() {
       : 'Prix récents.'}</p></div>`;
   $('#resultats').innerHTML = plans
     .map((p, i) => carte(plansComplets[i], p.plan_id, age > 24 * 3600)).join('');
-}
-
-// --- Les ordres d'achat -----------------------------------------------------
-// Un panier d'annonces ne se repete pas : chaque annonce est unique, et le
-// lendemain il faut tout rechercher. Un ordre se pose une fois et se remplit
-// tout seul -- c'est la seule forme exploitable quand on veut REFAIRE le
-// meme contrat.
-
-async function ordres() {
-  const r = $('#ord-rarity').value;
-  $('#ord-sortie').innerHTML = '<div class="card"><span class="spin"></span>lecture…</div>';
-  const d = await fetch('/api/orders?rarity=' + r).then(x => x.json());
-  if (d.error) {
-    $('#ord-sortie').innerHTML = '<div class="card"><div class="warn">' +
-      d.error + '</div></div>';
-    return;
-  }
-  const plans = d.plans || [];
-  const vieux = d.age_hours !== null && d.age_hours > 24;
-
-  if (!plans.length) {
-    $('#ord-sortie').innerHTML = `<div class="card">
-      <b>Aucun ordre ne peut rendre un contrat rentable dans cette rareté.</b>
-      <p class="muted">Soit le rabais nécessaire dépasse ce qu’un ordre peut
-      espérer obtenir, soit il tomberait sous le plancher de 0,03 € de Steam.
-      Les prix viennent du dernier balayage.</p></div>`;
-    return;
-  }
-
-  $('#ord-sortie').innerHTML = `
-    <div class="card">
-      <b>${plans.length} contrat(s) atteignables par ordre d’achat</b>
-      <p class="muted">Ordres à placer sur <b>${d.market}</b> ·
-      montants en ${d.currency} · rendement visé
-      +${Math.round(d.target_roi * 100)} %
-      ${d.age_hours === null ? '' : `· prix vieux de ${d.age_hours} h`}
-      ${vieux ? '<br><b>Plus de 24 h : recotez avant de placer.</b>' : ''}</p>
-    </div>` + plans.map(p => `
-    <div class="card">
-      <div class="tete">
-        <div>
-          <h2>${p.collection} <span class="tag">${p.rarity}</span></h2>
-          <div class="muted">10 entrées → 1 sortie ${p.rarity_target}</div>
-        </div>
-        <div style="text-align:right">
-          <div class="gros prof">−${Math.round(p.discount * 100)} %</div>
-          <div class="muted">rabais à obtenir</div>
-        </div>
-      </div>
-      <div class="chiffres">
-        <span>au prix demandé <b>${p.market_cost.toFixed(2)}</b></span>
-        <span>budget maximal <b>${p.budget.toFixed(2)}</b></span>
-        <span>revente nette attendue <b>${p.ev_net.toFixed(2)}</b></span>
-        <span>chances de gagner <b>${Math.round(p.win_probability * 100)} %</b></span>
-      </div>
-      <div class="etape">Ordres à placer sur ${d.market}</div>
-      <div class="scroll"><table>
-        <thead><tr><th>Objet</th><th class="num">Qté</th>
-          <th class="num">Prix marché</th><th class="num">Prix d’ordre</th>
-          <th class="num">Rabais</th></tr></thead>
-        <tbody>${p.lines.map(l => `<tr>
-          <td>${l.name}${l.below_floor
-            ? ' <span class="tag">sous le plancher Steam</span>' : ''}</td>
-          <td class="num">${l.quantity}</td>
-          <td class="num">${l.market_price.toFixed(2)}</td>
-          <td class="num prof">${l.order_price.toFixed(2)}</td>
-          <td class="num">${Math.round(l.discount * 100)} %</td></tr>`).join('')}
-        </tbody>
-      </table></div>
-      <div class="warn"><b>Le float sera tiré au hasard dans le palier.</b>
-      Un ordre d’achat porte sur une usure, pas sur un float : c’est le prix
-      qui est choisi, pas la qualité. Les chances de gagner ci-dessus en
-      tiennent compte.</div>
-    </div>`).join('');
-}
-
-// Le MEME panier, achete sur l'autre marche. Un utilisateur qui verifie une
-// entree le fait sur Steam, y trouve plus cher, et croit a une erreur : mesure
-// sur Dead Hand, 1,26 sur CSFloat contre 1,74 sur Steam. Les deux chiffres
-// sont justes. Les montrer ensemble dit aussi si le contrat ne tient QUE grace
-// a l'ecart entre les marches -- 108 % d'un cote, 78 % de l'autre.
-function comparatif(p) {
-  if (p.cost_alt === null || p.cost_alt === undefined) {
-    return `<p class="muted">Coût sur ${p.sell_market || 'Steam'} :
-      <b>non disponible</b> — un prix manquait. Vérifier une entrée sur
-      ${p.sell_market || 'Steam'} y donnera un chiffre plus élevé sans que
-      celui-ci soit faux.</p>`;
-  }
-  const ecart = (p.cost_alt - p.cost) / p.cost;
-  const profAlt = p.profitability_alt || 0;
-  const tient = profAlt >= SEUIL_PROFITABLE;
-  return `<div class="scroll"><table>
-    <thead><tr><th>si vous achetez sur…</th><th class="num">coût des 10</th>
-      <th class="num">profitabilité</th></tr></thead>
-    <tbody>
-      <tr><td><b>${p.buy_market || 'CSFloat'}</b> (ce que la recette demande)</td>
-        <td class="num">${p.cost.toFixed(2)}</td>
-        <td class="num prof">${profTexte(p.profitability)}</td></tr>
-      ${p.cost_deep === null || p.cost_deep === undefined ? '' : `
-      <tr><td>${p.buy_market || 'CSFloat'}, <b>sans arriver premier</b>
-        <span class="muted">(3 annonces prises par objet)</span></td>
-        <td class="num">${p.cost_deep.toFixed(2)}</td>
-        <td class="num ${(p.profitability_deep || 0) >= SEUIL_PROFITABLE
-          ? 'prof' : 'neg'}">${profTexte(p.profitability_deep)}</td></tr>`}
-      <tr><td>${p.sell_market || 'Steam'}</td>
-        <td class="num">${p.cost_alt.toFixed(2)}
-          <span class="muted">(${ecart >= 0 ? '+' : ''}${Math.round(ecart * 100)} %)</span></td>
-        <td class="num ${tient ? 'prof' : 'neg'}">${profTexte(profAlt)}</td></tr>
-    </tbody></table></div>
-  ${p.fragile ? `<div class="warn">
-    <b>Contrat FRAGILE.</b> Il ne tient qu'en arrivant premier sur le carnet :
-    dès que quelques annonces sont prises, il passe sous le point mort — ou le
-    panier ne peut plus être composé du tout. Les annonces retenues sont par
-    construction les moins chères, donc les premières achetées par quiconque
-    fait le même calcul.</div>` : ''}
-  ${!tient && p.profitability >= SEUIL_PROFITABLE ? `<div class="warn">
-    <b>Ce contrat ne tient que sur ${p.buy_market || 'CSFloat'}.</b> Acheté sur
-    ${p.sell_market || 'Steam'} il passe sous le point mort. L’écart entre les
-    deux marchés EST la marge — et tout achat ${p.buy_market || 'CSFloat'}
-    subit le verrou de 7 jours.</div>` : ''}`;
-}
-
-// Les DEUX voies d'approvisionnement, avec leur compromis.
-//
-// CSFloat : float choisi, prix bas -- mais verrou de 7 jours, et une annonce
-// est unique donc rien n'est repetable.
-// Ordre Steam : float SUBI, prix a obtenir par rabais -- mais utilisable tout
-// de suite, et l'ordre se pose une fois puis se remplit seul.
-//
-// Ce qui tranche n'est pas le prix, c'est le float : un ordre porte sur une
-// usure, pas sur une qualite. Si les sorties changent de palier quand le float
-// est subi, la voie Steam est simplement fermee.
-function deuxVoies(p) {
-  const ok = p.float_subi_ok;
-  const rabais = p.order_discount;
-  const budget = p.order_budget;
-
-  const ligneSteam = (ok === false)
-    ? `<tr><td><b>Ordre d’achat Steam</b></td>
-        <td class="num neg">impossible</td>
-        <td>le float est subi, et les sorties changeraient de palier —
-          ce contrat exige de choisir les floats</td></tr>`
-    : (rabais === null || rabais === undefined)
-      ? `<tr><td><b>Ordre d’achat Steam</b></td><td class="num">—</td>
-          <td>prix Steam indisponible</td></tr>`
-      : `<tr><td><b>Ordre d’achat Steam</b></td>
-          <td class="num prof">${budget.toFixed(2)}</td>
-          <td>viser <b>−${Math.round(rabais * 100)} %</b> sous le prix affiché.
-            Float subi mais acceptable. <b>Répétable</b>, pas de verrou.</td></tr>`;
-
-  return `<div class="etape">Les deux voies</div>
-    <div class="scroll"><table>
-      <thead><tr><th>voie</th><th class="num">à payer pour les 10</th>
-        <th>ce que ça implique</th></tr></thead>
-      <tbody>
-        <tr><td><b>Achat direct CSFloat</b></td>
-          <td class="num prof">${p.cost.toFixed(2)}</td>
-          <td>float choisi, disponible tout de suite.
-            <b>Verrou de 7 jours</b>, et non répétable — ces annonces sont
-            uniques.</td></tr>
-        ${ligneSteam}
-      </tbody>
-    </table></div>`;
 }
 
 // --- La recherche -----------------------------------------------------------
@@ -1695,9 +1481,9 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
   document.querySelectorAll('.pane').forEach(p =>
     p.classList.toggle('on', p.id === 'pane-' + t.dataset.pane));
-  if (t.dataset.pane === 'ordres') ordres();
-  if (t.dataset.pane === 'histo') histo();
-  if (t.dataset.pane === 'contrats') contrats();
+  // Les plans calcules et les contrats suivis sont deux vues du meme objet
+  // et partagent desormais un onglet : un seul clic charge les deux.
+  if (t.dataset.pane === 'contrats') { contrats(); histo(); }
   if (t.dataset.pane === 'inventaire') invApercu(false);
 });
 
@@ -1751,7 +1537,7 @@ async function contrats() {
   const l = d.contracts || [];
   if (!l.length) {
     $('#contrats').innerHTML = '<div class="card muted">Aucun contrat suivi. ' +
-      'Ouvrez l&rsquo;historique et cliquez Suivre.</div>';
+      'Cliquez Suivre sur un plan calcule, plus bas.</div>';
     return;
   }
   $('#contrats').innerHTML = l.map(c => {
@@ -2020,8 +1806,6 @@ $('#inv-calculer').addEventListener('click', async () => {
 
 $('#tous').addEventListener('change', contrats);
 $('#rafraichir').addEventListener('click', contrats);
-$('#ord-rarity').addEventListener('change', ordres);
-$('#ord-relire').addEventListener('click', ordres);
 $('#rarity').addEventListener('change', () => {
   charger();
   dernierBalayage();

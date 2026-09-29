@@ -607,3 +607,77 @@ def test_le_budget_coupe_aussi_la_valorisation_des_sorties():
     with pytest.raises(BudgetEpuise):
         p.sell_net(SKIN, Wear.FACTORY_NEW)
     assert marche.appels == 0, "aucune cotation apres l'echeance"
+
+
+# --- Le prix d'ordre OBJET PAR OBJET ------------------------------------------
+# Un budget total ne se place pas : on pose un ordre par objet, a un prix. Tant
+# que `_cout_ailleurs` sommait les prix Steam puis les jetait, la carte ne
+# pouvait donner qu'un budget global -- et les ordres devaient vivre dans un
+# onglet separe qui refaisait tout le calcul.
+
+
+class _PlanMinimal:
+    """Juste ce que `steam_order_lines` lit, sans construire un vrai plan."""
+
+    def __init__(self, ev_net, alt_cost, alt_prices, options):
+        self.result = type("R", (), {"ev_net": ev_net})()
+        self.alt_cost = alt_cost
+        self.alt_prices = alt_prices
+        self.options = options
+
+    steam_order_budget = None  # remplace ci-dessous par la vraie methode
+    steam_order_lines = None
+
+
+def _plan_minimal(ev_net, alt_cost, alt_prices, noms):
+    from tradeup.plan import Plan
+
+    p = _PlanMinimal(ev_net, alt_cost, alt_prices,
+                     tuple(type("O", (), {"name": n})() for n in noms))
+    # On emprunte les vraies methodes : le test doit exercer le code livre,
+    # pas une copie.
+    p.steam_order_budget = Plan.steam_order_budget.__get__(p)
+    p.steam_order_lines = Plan.steam_order_lines.__get__(p)
+    return p
+
+
+def test_le_prix_dordre_se_deduit_du_prix_steam_de_chaque_objet():
+    """Le budget est reparti proportionnellement : le MEME rabais partout.
+
+    Repartir autrement supposerait de savoir sur quels objets les vendeurs
+    cedent le plus, ce qu'aucune donnee ici ne dit.
+    """
+    # EV 12, rendement visé +20 % -> budget 10. Panier Steam a 20 -> facteur 0.5.
+    plan = _plan_minimal(12.0, 20.0, {"A": 2.0, "B": 1.0}, ["A"] * 9 + ["B"])
+    lignes = {l["name"]: l for l in plan.steam_order_lines()}
+
+    assert lignes["A"]["quantity"] == 9 and lignes["B"]["quantity"] == 1
+    assert lignes["A"]["order_price"] == pytest.approx(1.0)
+    assert lignes["B"]["order_price"] == pytest.approx(0.5)
+    # Le total des ordres ne DEPASSE pas le budget -- c'est tout l'objet de
+    # l'arrondi vers le bas.
+    total = sum(l["quantity"] * l["order_price"] for l in lignes.values())
+    assert total <= plan.steam_order_budget() + 1e-9
+
+
+def test_le_prix_dordre_sarrondit_vers_le_BAS():
+    """Arrondir vers le haut depasserait le budget et mangerait la marge."""
+    # facteur = 10/20 = 0.5 ; 0.07 * 0.5 = 0.035 -> 0.03, pas 0.04.
+    plan = _plan_minimal(12.0, 20.0, {"A": 0.07}, ["A"] * 10)
+    assert plan.steam_order_lines()[0]["order_price"] == pytest.approx(0.03)
+
+
+def test_un_ordre_sous_le_plancher_steam_est_signale():
+    """Un ordre sous 0.03 ne sera jamais servi : aucun rabais ne le sauve."""
+    plan = _plan_minimal(12.0, 20.0, {"A": 0.03}, ["A"] * 10)
+    assert plan.steam_order_lines()[0]["below_floor"] is True
+
+
+def test_sans_prix_steam_il_ny_a_pas_de_prix_dordre():
+    """Un detail incomplet vaut moins que pas de detail : on renvoie None
+    plutot que des ordres pour une partie du panier seulement."""
+    assert _plan_minimal(12.0, 20.0, None, ["A"] * 10).steam_order_lines() is None
+    assert _plan_minimal(12.0, None, {"A": 1.0}, ["A"] * 10).steam_order_lines() is None
+    # Un nom du panier absent des prix : meme conclusion.
+    plan = _plan_minimal(12.0, 20.0, {"A": 1.0}, ["A"] * 9 + ["B"])
+    assert plan.steam_order_lines() is None

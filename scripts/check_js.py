@@ -72,6 +72,12 @@ const __plan = {
   cost_alt: 8.14, profitability_alt: 0.76,
   cost_deep: 4.92, profitability_deep: 1.25, fragile: false,
   float_subi_ok: true, order_budget: 5.14, order_discount: 0.31,
+  order_lines: [
+    { name: 'Sawed-Off | Lunar Wyrm (Minimal Wear)', quantity: 9,
+      market_price: 0.79, order_price: 0.54, below_floor: false },
+    { name: 'MAC-10 | Arabesque Mosaic (Field-Tested)', quantity: 1,
+      market_price: 0.04, order_price: 0.02, below_floor: true },
+  ],
   inputs: [{ name: 'Sawed-Off | Lunar Wyrm (Minimal Wear)', float: 0.1246,
              price: 0.50, url: 'https://csfloat.com/item/1' }],
   outcomes: [{ name: 'AUG | Lapis Lazuli (Minimal Wear)', probability: 0.3333,
@@ -93,11 +99,23 @@ const __cas = [
   ['carte, prix Steam absent',
    () => carte({ ...__plan, cost_alt: null, profitability_alt: null },
                'abc', false)],
+  // Voie Steam fermee alors que les prix d'ordre EXISTENT : le bloc doit
+  // disparaitre, sans quoi la carte proposerait des ordres deux lignes apres
+  // avoir dit que cette voie est impossible.
   ['carte, voie Steam fermee',
    () => carte({ ...__plan, float_subi_ok: false }, 'abc', false)],
   ['carte, sortie perdante',
    () => carte({ ...__plan, all_profitable: false, worst_profit: -0.4 },
                'abc', false)],
+  // Un plan journalise AVANT l'ajout des prix d'ordre n'a pas le champ. Le
+  // bloc doit disparaitre, pas lever ni afficher un tableau vide.
+  ['carte, plan sans prix d ordre',
+   () => carte({ ...__plan, order_lines: null }, 'abc', false)],
+  // La voie Steam fermee ET aucun budget d'ordre : les deux branches de
+  // `voies()` qui ne montrent pas de prix.
+  ['carte, ordre Steam impossible',
+   () => carte({ ...__plan, float_subi_ok: false, order_budget: null,
+                 order_discount: null, order_lines: null }, 'abc', false)],
 ];
 
 let __ko = 0;
