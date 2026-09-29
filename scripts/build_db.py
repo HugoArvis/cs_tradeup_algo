@@ -57,7 +57,7 @@ EXCLUDED_CATEGORIES = {"Knives", "Gloves"}
 
 def fetch(url: str) -> list[dict]:
     print(f"Telechargement de {url} ...", file=sys.stderr)
-    req = urllib.request.Request(url, headers={"User-Agent": "cs-tradeup-algo/0.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "tradeupfinder/0.1"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         return json.loads(resp.read().decode("utf-8"))
 

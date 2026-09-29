@@ -13,9 +13,9 @@ import time
 
 import pytest
 
-from tradeup.pricing.base import PriceSource, Quote
-from tradeup.pricing.cache import QuoteCache
-from tradeup.refresh import (
+from tradeupfinder.pricing.base import PriceSource, Quote
+from tradeupfinder.pricing.cache import QuoteCache
+from tradeupfinder.refresh import (
     DEFAULT_DRIFT_THRESHOLD,
     Drift,
     collection_roles,
@@ -168,8 +168,8 @@ def test_seuil_par_defaut_documente():
 
 
 def test_les_entrees_et_les_sorties_ont_des_roles_distincts():
-    from tradeup.db import SkinDatabase
-    from tradeup.models import Rarity
+    from tradeupfinder.db import SkinDatabase
+    from tradeupfinder.models import Rarity
 
     db = SkinDatabase.load()
     col = db.find_collection("The Bank Collection")

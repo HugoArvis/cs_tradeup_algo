@@ -19,9 +19,9 @@ import statistics
 
 import pytest
 
-from tradeup.db import SkinDatabase
-from tradeup.ev import InputItem, evaluate
-from tradeup.floatrisk import (
+from tradeupfinder.db import SkinDatabase
+from tradeupfinder.ev import InputItem, evaluate
+from tradeupfinder.floatrisk import (
     average_mu,
     average_sigma,
     evaluate_stochastic,
@@ -32,10 +32,10 @@ from tradeup.floatrisk import (
     segment_probabilities,
     uniform_sigma,
 )
-from tradeup.generator import InputOption, build_options, optimize_recipe, Recipe
-from tradeup.models import Rarity
-from tradeup.pricing.repository import StaticPricer
-from tradeup.wear import wear_breakpoints
+from tradeupfinder.generator import InputOption, build_options, optimize_recipe, Recipe
+from tradeupfinder.models import Rarity
+from tradeupfinder.pricing.repository import StaticPricer
+from tradeupfinder.wear import wear_breakpoints
 
 
 @pytest.fixture(scope="module")
@@ -69,7 +69,7 @@ def test_sigma_dune_uniforme():
 
 def test_une_offre_identifiee_na_aucun_alea(bank):
     skin = bank.by_rarity(Rarity.INDUSTRIAL)[0]
-    from tradeup.wear import wear_of
+    from tradeupfinder.wear import wear_of
 
     f = (skin.min_float + skin.max_float) / 2
     offre = InputOption(skin, wear_of(f), 1.0, f, listing_id="abc123")
@@ -186,7 +186,7 @@ def test_le_modele_colle_au_monte_carlo(bank):
 
 
 def test_le_kurtosis_est_nul_sans_alea(bank):
-    from tradeup.wear import wear_of
+    from tradeupfinder.wear import wear_of
 
     skin = bank.by_rarity(Rarity.INDUSTRIAL)[0]
     f = (skin.min_float + skin.max_float) / 2

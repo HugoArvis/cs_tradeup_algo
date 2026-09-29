@@ -14,7 +14,7 @@ from unittest import mock
 
 import pytest
 
-from tradeup import cli
+from tradeupfinder import cli
 
 
 def parse(*argv: str):
@@ -86,7 +86,7 @@ def test_max_collections_limite_a_deux():
 
 
 def test_alias_de_rarete_couvrent_les_entrees_possibles():
-    from tradeup.models import TRADEABLE_INPUT_RARITIES
+    from tradeupfinder.models import TRADEABLE_INPUT_RARITIES
 
     cibles = set(cli.RARITY_ALIASES.values())
     assert cibles == set(TRADEABLE_INPUT_RARITIES)
@@ -228,9 +228,9 @@ def test_le_seuil_de_profitabilite_se_traduit_en_roi():
 def test_le_rejet_donne_les_deux_conventions():
     """Un motif qui n'affiche que le ROI invite a le confondre avec la
     profitabilite lue dans une video."""
-    from tradeup.ev import Outcome, TradeUpResult
-    from tradeup.models import Rarity, Skin, Wear
-    from tradeup.scoring import ScreenConfig
+    from tradeupfinder.ev import Outcome, TradeUpResult
+    from tradeupfinder.models import Rarity, Skin, Wear
+    from tradeupfinder.scoring import ScreenConfig
 
     skin = Skin("s", "S", "c", Rarity.RESTRICTED, 0.0, 1.0)
     perdant = TradeUpResult(
@@ -252,7 +252,7 @@ def test_un_429_steam_nest_pas_annonce_comme_un_quota_csfloat(capsys):
     Annoncer "quota CSFloat" sur un 429 de Steam envoie chercher une cle API
     la ou il fallait attendre et baisser le debit.
     """
-    from tradeup.pricing.http import RateLimited
+    from tradeupfinder.pricing.http import RateLimited
 
     def echoue(_args):
         raise RateLimited(
@@ -260,7 +260,7 @@ def test_un_429_steam_nest_pas_annonce_comme_un_quota_csfloat(capsys):
         )
 
     faux = types.SimpleNamespace(func=echoue, verbose=False)
-    with mock.patch("tradeup.cli.build_parser") as bp:
+    with mock.patch("tradeupfinder.cli.build_parser") as bp:
         bp.return_value.parse_args.return_value = faux
         code = cli.main([])
 
@@ -270,13 +270,13 @@ def test_un_429_steam_nest_pas_annonce_comme_un_quota_csfloat(capsys):
 
 
 def test_un_429_csfloat_garde_son_message(capsys):
-    from tradeup.pricing.http import RateLimited
+    from tradeupfinder.pricing.http import RateLimited
 
     def echoue(_args):
         raise RateLimited("429 persistant sur https://csfloat.com/api/v1/listings")
 
     faux = types.SimpleNamespace(func=echoue, verbose=False)
-    with mock.patch("tradeup.cli.build_parser") as bp:
+    with mock.patch("tradeupfinder.cli.build_parser") as bp:
         bp.return_value.parse_args.return_value = faux
         code = cli.main([])
 

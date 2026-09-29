@@ -16,7 +16,7 @@ REM du jeu, pas un hasard.
 cd /d "%~dp0.."
 set PYTHONIOENCODING=utf-8
 
-python -m tradeup.cli sweep --rarity mil-spec --rate 8 >> "data\balayage.log" 2>&1
+python -m tradeupfinder.cli sweep --rarity mil-spec --rate 8 >> "data\balayage.log" 2>&1
 
 echo [%date% %time%] code %ERRORLEVEL% >> "data\balayage.log"
 exit /b %ERRORLEVEL%

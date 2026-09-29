@@ -12,8 +12,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from tradeup.models import Rarity, Skin, Wear
-from tradeup.plan import CSFloatPricer
+from tradeupfinder.models import Rarity, Skin, Wear
+from tradeupfinder.plan import CSFloatPricer
 
 CIBLE = Skin(key="ak", name="AK-47 | Emerald Pinstripe", collection_id="bank",
              rarity=Rarity.RESTRICTED, min_float=0.0, max_float=1.0)
@@ -140,9 +140,9 @@ def test_tolerance_a_la_baisse_de_prix():
     une exposition directionnelle reelle, qu'il faut chiffrer plutot que de la
     passer sous silence.
     """
-    from tradeup.ev import InputItem, Outcome, TradeUpResult
-    from tradeup.models import Rarity, Skin
-    from tradeup.plan import Plan
+    from tradeupfinder.ev import InputItem, Outcome, TradeUpResult
+    from tradeupfinder.models import Rarity, Skin
+    from tradeupfinder.plan import Plan
 
     entree = Skin(key="in", name="in", collection_id="c", rarity=Rarity.MIL_SPEC,
                   min_float=0.0, max_float=1.0)
@@ -164,9 +164,9 @@ def test_tolerance_a_la_baisse_de_prix():
 
 
 def test_pas_de_tolerance_si_la_sortie_ne_vaut_rien():
-    from tradeup.ev import InputItem, TradeUpResult
-    from tradeup.models import Rarity, Skin
-    from tradeup.plan import Plan
+    from tradeupfinder.ev import InputItem, TradeUpResult
+    from tradeupfinder.models import Rarity, Skin
+    from tradeupfinder.plan import Plan
 
     entree = Skin(key="in", name="in", collection_id="c", rarity=Rarity.MIL_SPEC,
                   min_float=0.0, max_float=1.0)

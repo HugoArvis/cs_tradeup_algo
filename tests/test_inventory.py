@@ -13,8 +13,8 @@ import json
 
 import pytest
 
-from tradeup.db import SkinDatabase
-from tradeup.inventory import (
+from tradeupfinder.db import SkinDatabase
+from tradeupfinder.inventory import (
     OwnedItem,
     best_tradeups,
     closest_gaps,
@@ -23,9 +23,9 @@ from tradeup.inventory import (
     resolve,
     summary,
 )
-from tradeup.models import Rarity, Skin
-from tradeup.pricing.repository import StaticPricer
-from tradeup.wear import wear_of
+from tradeupfinder.models import Rarity, Skin
+from tradeupfinder.pricing.repository import StaticPricer
+from tradeupfinder.wear import wear_of
 
 
 @pytest.fixture(scope="module")
@@ -129,7 +129,7 @@ def test_chaque_objet_ne_sert_quune_fois(db, bank):
 
 
 def test_les_floats_sont_exacts_donc_sans_alea(db, bank):
-    from tradeup.floatrisk import average_sigma
+    from tradeupfinder.floatrisk import average_sigma
 
     plans = best_tradeups(db, inventaire(bank), prix(bank), Rarity.INDUSTRIAL,
                           include_losing=True)
@@ -165,7 +165,7 @@ def test_un_souvenir_peut_entrer_en_contrat_depuis_mai_2026():
 
 def test_un_souvenir_est_rattache_a_son_skin(db):
     """Sans retrait du prefixe, la base ne reconnait pas l'objet et l'ignore."""
-    from tradeup.wear import wear_of
+    from tradeupfinder.wear import wear_of
 
     skin = db.find("AK-47 | Redline")
     assert skin is not None
@@ -263,7 +263,7 @@ def test_lecart_au_compte_est_chiffre(db, bank):
 
 def test_le_classement_change_reellement_lordre(db, bank):
     """Le gain brut et la probabilite ne designent pas le meme gagnant."""
-    from tradeup.scoring import Ranking
+    from tradeupfinder.scoring import Ranking
 
     rarity = Rarity.INDUSTRIAL
     autre = next(
@@ -306,9 +306,9 @@ def test_le_classement_change_reellement_lordre(db, bank):
 
 
 def test_toutes_rentables_se_reconnait():
-    from tradeup.ev import Outcome, TradeUpResult
-    from tradeup.inventory import InventoryTradeUp
-    from tradeup.models import Wear
+    from tradeupfinder.ev import Outcome, TradeUpResult
+    from tradeupfinder.inventory import InventoryTradeUp
+    from tradeupfinder.models import Wear
 
     def contrat(nets, cout=10.0):
         skin = Skin(key="s", name="S", collection_id="c", rarity=Rarity.MIL_SPEC,

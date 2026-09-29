@@ -23,11 +23,11 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.db import SkinDatabase
-from tradeup.ev import InputItem, evaluate
-from tradeup.models import Rarity, Wear
-from tradeup.pricing.repository import StaticPricer
-from tradeup.wear import average_normalized, output_float, wear_of
+from tradeupfinder.db import SkinDatabase
+from tradeupfinder.ev import InputItem, evaluate
+from tradeupfinder.models import Rarity, Wear
+from tradeupfinder.pricing.repository import StaticPricer
+from tradeupfinder.wear import average_normalized, output_float, wear_of
 
 #: (nom du skin, float paye, prix paye)
 ENTREES_REELLES = [

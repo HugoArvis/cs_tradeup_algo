@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.pricing.csfloat import CSFloat
+from tradeupfinder.pricing.csfloat import CSFloat
 
 
 class FakeHttpClient:
@@ -184,8 +184,8 @@ def test_cle_api_obligatoire():
 
 def test_mode_hors_ligne_ne_touche_pas_au_reseau(tmp_path):
     """`scan --offline` ne doit pas appeler CSFloat, quota ou pas."""
-    from tradeup.pricing.cache import QuoteCache
-    from tradeup.pricing.base import Quote
+    from tradeupfinder.pricing.cache import QuoteCache
+    from tradeupfinder.pricing.base import Quote
 
     cache = QuoteCache(path=tmp_path / "c.db")
     cache.put(Quote("AK-47 | Redline (Field-Tested)", "csfloat", 10.0, 11.0,
@@ -243,7 +243,7 @@ def test_la_fenetre_de_cotation_est_large():
     Redline (Field-Tested) etaient TOUTES stickees -- 3 nues seulement sur 50.
     Une fenetre etroite ne trouve donc rien a coter sur les skins populaires.
     """
-    from tradeup.pricing.csfloat import LISTINGS_WINDOW
+    from tradeupfinder.pricing.csfloat import LISTINGS_WINDOW
 
     src, client = make_source({"data": [make_row("a", 100)]})
     src.fetch("AK-47 | Redline (FT)", use_cache=False)
@@ -280,8 +280,8 @@ def test_le_volume_est_recupere_sur_demande():
 
 def test_une_cotation_cachee_sans_volume_ne_satisfait_pas_une_demande_avec(tmp_path):
     """Sinon l'objet parait illiquide alors qu'on n'a jamais pose la question."""
-    from tradeup.pricing.base import Quote
-    from tradeup.pricing.cache import QuoteCache
+    from tradeupfinder.pricing.base import Quote
+    from tradeupfinder.pricing.cache import QuoteCache
 
     cache = QuoteCache(path=tmp_path / "c.db")
     cache.put(Quote("X", "csfloat", 5.0, 5.0, None, currency="USD"))

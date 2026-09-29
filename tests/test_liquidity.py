@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.ev import InputItem, Outcome, TradeUpResult
-from tradeup.liquidity import execution_capacity
-from tradeup.models import Rarity, Skin, Wear
+from tradeupfinder.ev import InputItem, Outcome, TradeUpResult
+from tradeupfinder.liquidity import execution_capacity
+from tradeupfinder.models import Rarity, Skin, Wear
 
 
 def skin(key, rarity=Rarity.MIL_SPEC):
@@ -130,8 +130,8 @@ def test_le_volume_dachat_vient_du_marche_dachat():
     la contrainte s'evanouit en silence et le contrat parait executable sans
     limite.
     """
-    from tradeup.pricing.base import Quote
-    from tradeup.pricing.repository import MarketPricer
+    from tradeupfinder.pricing.base import Quote
+    from tradeupfinder.pricing.repository import MarketPricer
 
     class Source:
         def __init__(self, nom, volume):
@@ -147,8 +147,8 @@ def test_le_volume_dachat_vient_du_marche_dachat():
 
 
 def test_une_entree_trop_peu_liquide_est_ecartee():
-    from tradeup.pricing.base import Quote
-    from tradeup.pricing.repository import MarketPricer
+    from tradeupfinder.pricing.base import Quote
+    from tradeupfinder.pricing.repository import MarketPricer
 
     class Source:
         name = "steam"

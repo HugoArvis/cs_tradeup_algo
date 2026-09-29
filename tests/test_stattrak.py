@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-from tradeup.db import SkinDatabase
-from tradeup.generator import Recipe, build_options, iter_recipes, optimize_recipe
-from tradeup.models import Collection, Rarity, Skin
-from tradeup.pricing.repository import StaticPricer
-from tradeup.scan import required_market_names
+from tradeupfinder.db import SkinDatabase
+from tradeupfinder.generator import Recipe, build_options, iter_recipes, optimize_recipe
+from tradeupfinder.models import Collection, Rarity, Skin
+from tradeupfinder.pricing.repository import StaticPricer
+from tradeupfinder.scan import required_market_names
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +62,7 @@ def test_retirer_des_sorties_redistribue_la_probabilite():
     Garder les skins non-StatTrak au denominateur donnerait 33 % la ou la
     reponse est 50 %.
     """
-    from tradeup.ev import outcome_probabilities
+    from tradeupfinder.ev import outcome_probabilities
 
     col = collection_mixte()
     normales = outcome_probabilities(

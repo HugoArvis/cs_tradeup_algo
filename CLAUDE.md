@@ -24,6 +24,31 @@ fait, comment, et ce qui a été vérifié.
 Si le serveur MCP ClickUp est injoignable, le dire et demander quoi faire — ne
 jamais sauter la vérification en silence.
 
+## Flux de travail
+
+Trois branches, trois rôles : `main` porte la version du projet, `dev` intègre
+ce qui est relu, et **chaque feature a sa propre branche**. Ne jamais commiter
+directement sur `main` ni sur `dev` — vérifier la branche courante avant le
+premier commit, pas après.
+
+Une feature terminée se pousse (`git push -u origin <branche>`) puis s'ouvre en
+**pull request avec `dev` pour base**. La relecture est faite par une **autre
+instance de Claude**, précisément pour qu'elle ne soit pas biaisée par le
+travail relu : `/code-review ultra <PR#>`. C'est une commande déclenchée par
+l'utilisateur et facturée — l'instance auteure ne peut pas la lancer elle-même,
+elle donne le numéro de PR et s'arrête là. Le merge est accepté par
+l'utilisateur.
+
+Ce détour n'est pas une formalité : les bugs les plus coûteux du projet
+— devises mélangées dans le balayage, `median_price` retenu sur un volume de 1,
+`SEUIL_PROFITABLE` disparu du JavaScript — ont tous été attrapés par
+l'utilisateur en lisant un résultat, jamais par l'instance qui venait de les
+écrire.
+
+`gh` n'est pas installé sur la machine de développement. À défaut, l'URL
+`https://github.com/HugoArvis/tradeupfinder/compare/dev...<branche>?expand=1`
+ouvre la pull request avec la bonne base.
+
 ## Commandes
 
 ```bash
@@ -32,14 +57,14 @@ python -m scripts.build_db            # (re)construit data/collections.json
 python -m pytest -q                   # 150 tests, < 15 s
 python -m pytest tests/test_core.py -k probabilites
 python scripts/check_js.py            # apres toute retouche du JS de web.py
-python -m tradeup.web                 # application locale, port 8765
-python -m tradeup.cli plan "The Bank Collection" --rarity industrial --html
-python -m tradeup.cli verify --collection "The Bank Collection" --rarity industrial
-python -m tradeup.cli orders --rarity mil-spec   # prix d'ordre d'achat a placer
-python -m tradeup.cli daily --rarity industrial  # passage quotidien, code 10 si actionnable
+python -m tradeupfinder.web                 # application locale, port 8765
+python -m tradeupfinder.cli plan "The Bank Collection" --rarity industrial --html
+python -m tradeupfinder.cli verify --collection "The Bank Collection" --rarity industrial
+python -m tradeupfinder.cli orders --rarity mil-spec   # prix d'ordre d'achat a placer
+python -m tradeupfinder.cli daily --rarity industrial  # passage quotidien, code 10 si actionnable
 ```
 
-Le raccourci `tradeup` n'est pas dans le `PATH` : passer par `python -m tradeup.cli`.
+Le raccourci `tradeupfinder` n'est pas dans le `PATH` : passer par `python -m tradeupfinder.cli`.
 
 ## Environnement
 

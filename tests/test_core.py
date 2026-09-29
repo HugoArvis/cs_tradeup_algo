@@ -6,13 +6,13 @@ import math
 
 import pytest
 
-from tradeup.ev import InputItem, evaluate, outcome_probabilities
-from tradeup.fees import steam_net_proceeds
-from tradeup.generator import InputOption, cheapest_selection
-from tradeup.models import Rarity, Skin, Wear
-from tradeup.pricing.base import parse_money, parse_volume
-from tradeup.pricing.repository import StaticPricer
-from tradeup.wear import (
+from tradeupfinder.ev import InputItem, evaluate, outcome_probabilities
+from tradeupfinder.fees import steam_net_proceeds
+from tradeupfinder.generator import InputOption, cheapest_selection
+from tradeupfinder.models import Rarity, Skin, Wear
+from tradeupfinder.pricing.base import parse_money, parse_volume
+from tradeupfinder.pricing.repository import StaticPricer
+from tradeupfinder.wear import (
     average_normalized,
     output_float,
     wear_breakpoints,
@@ -254,8 +254,8 @@ def test_le_cache_ne_melange_pas_les_devises(tmp_path):
     rendait donc les anciens montants, et un calcul achat-Steam/revente-CSFloat
     comparait silencieusement des euros a des dollars.
     """
-    from tradeup.pricing.base import Quote
-    from tradeup.pricing.cache import QuoteCache
+    from tradeupfinder.pricing.base import Quote
+    from tradeupfinder.pricing.cache import QuoteCache
 
     cache = QuoteCache(tmp_path / "c.db", ttl_seconds=3600)
     cache.put(Quote("AK-47 | Redline (Field-Tested)", "steam", 36.69, 36.38, 125,
@@ -273,8 +273,8 @@ def test_le_cache_ne_melange_pas_les_devises(tmp_path):
 
 
 def test_deux_devises_coexistent_dans_le_cache(tmp_path):
-    from tradeup.pricing.base import Quote
-    from tradeup.pricing.cache import QuoteCache
+    from tradeupfinder.pricing.base import Quote
+    from tradeupfinder.pricing.cache import QuoteCache
 
     cache = QuoteCache(tmp_path / "c.db", ttl_seconds=3600)
     cache.put(Quote("X", "steam", 10.0, 10.0, 5, currency="EUR"))
@@ -359,7 +359,7 @@ def _resultat(profit_probability, ev_profit, roi=0.1, stdev=1.0):
 def test_le_classement_par_securite_place_la_probabilite_dabord():
     """Trois issues toutes rentables valent mieux qu'une issue unique au gain
     marginal : c'est une regle du domaine, pas une preference d'affichage."""
-    from tradeup.scoring import Ranking, sort_key
+    from tradeupfinder.scoring import Ranking, sort_key
 
     sur = _resultat(1.0, 0.50)
     loterie = _resultat(0.33, 2.00)
@@ -368,7 +368,7 @@ def test_le_classement_par_securite_place_la_probabilite_dabord():
 
 
 def test_le_departage_se_fait_sur_le_profit():
-    from tradeup.scoring import Ranking, sort_key
+    from tradeupfinder.scoring import Ranking, sort_key
 
     a = _resultat(0.5, 3.0)
     b = _resultat(0.5, 1.0)
@@ -378,7 +378,7 @@ def test_le_departage_se_fait_sur_le_profit():
 def test_le_classement_par_securite_ne_depend_pas_dun_nombre_magique():
     """`score()` encode SAFETY comme proba*1000 + profit : au-dela de 1000 de
     profit, l'ordre s'inverse. `sort_key` ne peut pas avoir ce defaut."""
-    from tradeup.scoring import Ranking, score, sort_key
+    from tradeupfinder.scoring import Ranking, score, sort_key
 
     sur = _resultat(1.0, 10.0)
     enorme = _resultat(0.10, 5000.0)
@@ -393,8 +393,8 @@ def test_la_profitabilite_suit_la_convention_des_guides():
     rapporte 10 %. Comparer un chiffre du projet a un chiffre d'une video exige
     la meme convention, sans quoi on compare 10 a 110.
     """
-    from tradeup.ev import Outcome, TradeUpResult
-    from tradeup.models import Wear
+    from tradeupfinder.ev import Outcome, TradeUpResult
+    from tradeupfinder.models import Wear
 
     skin = make_skin("s", Rarity.RESTRICTED)
 
@@ -428,7 +428,7 @@ def test_le_seuil_factory_new_dit_ou_le_tri_est_inutile():
     Mesure sur la base reelle : Aztec 0.875 contre Nuke 0.014, deux collections
     a sortie unique pourtant.
     """
-    from tradeup.models import Collection
+    from tradeupfinder.models import Collection
 
     def collection(mn, mx):
         return Collection(id="c", name="C", skins=(
@@ -449,7 +449,7 @@ def test_le_seuil_factory_new_dit_ou_le_tri_est_inutile():
 
 def test_le_seuil_retient_la_sortie_la_plus_contraignante():
     """Toutes les sorties doivent tenir, pas seulement la plus facile."""
-    from tradeup.models import Collection
+    from tradeupfinder.models import Collection
 
     col = Collection(id="c", name="C", skins=(
         make_skin("in", Rarity.INDUSTRIAL),
