@@ -976,6 +976,20 @@ padding:14px 16px}
 .mini.fort .muted,.mini.fort th{color:var(--card);opacity:.72}
 .mini.fort summary{color:var(--card)}
 .mini.fort .puce{border-color:rgba(127,127,127,.45)}
+.mini[data-ouvrir]{cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.mini[data-ouvrir]:hover,.mini[data-ouvrir]:focus-visible{border-color:var(--accent);
+box-shadow:0 3px 14px rgba(0,0,0,.10);outline:none}
+/* --- Modale d'un contrat --- */
+dialog.modale{width:min(940px,calc(100vw - 32px));max-height:calc(100vh - 48px);
+padding:0;border:1px solid var(--line);border-radius:14px;background:var(--card);
+color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.3)}
+dialog.modale::backdrop{background:rgba(12,16,24,.5)}
+.modale-corps{padding:22px 24px 8px}
+.modale-corps h2{font-size:20px;margin:0 0 4px}
+/* Les actions restent a portee quand la liste des objets defile. */
+.modale-pied{position:sticky;bottom:0;display:flex;justify-content:space-between;
+align-items:center;gap:12px;flex-wrap:wrap;padding:14px 24px;
+background:var(--bg);border-top:1px solid var(--line)}
 .colonne-vide{border:1px dashed var(--line);border-radius:12px;padding:14px 16px;
 color:var(--muted);font-size:13px}
 .puces{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
@@ -1051,6 +1065,8 @@ color:var(--muted);font-weight:600}
 button.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
 button.sm{padding:3px 10px;font-size:13px}
 button.retour{margin-bottom:14px;background:var(--card)}
+button.danger{color:var(--neg)}
+button.neutre{color:var(--ink);background:var(--card)}
 tr.done td{opacity:.55}
 .bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
 .bar>i{display:block;height:100%;background:var(--accent)}
@@ -1231,6 +1247,8 @@ vertical-align:-2px;margin-right:7px}
     </table></div>
   </div>
 </div>
+
+<dialog id="modale" class="modale" aria-label="Détail du contrat"></dialog>
 
 </main>
 </div>
@@ -1837,6 +1855,7 @@ async function contrats() {
   const d = await fetch('/api/contracts' + (tous ? '?all=1' : ''))
     .then(x => x.json());
   const l = d.contracts || [];
+  contratsCharges = l;
   $('#stats-contrats').innerHTML = statsContrats(l);
   $('#nb-contrats').textContent = l.filter(c => colonneDe(c) !== 'fini').length || '';
   if (!l.length) {
@@ -1856,35 +1875,54 @@ async function contrats() {
     }).join('');
 }
 
+// La vignette resume, la modale detaille. La liste des objets et les actions
+// vivaient dans un <details> de la vignette : dix lignes de tableau dans une
+// colonne de 250 px, qui defilaient de cote.
+
+let contratsCharges = [];
+let contratOuvert = null;
+
+function quandContrat(c) {
+  if (colonneDe(c) === 'fini') return c.status === 'realise' ? 'réalisé' : 'abandonné';
+  if (c.craftable) return 'exécutable maintenant';
+  if (c.craftable_at) return 'exécutable le ' + dt(c.craftable_at);
+  return 'créé le ' + dt(c.created_at);
+}
+
+function deriveContrat(c) {
+  if (c.float_drift === null || c.float_drift === undefined) return '';
+  const gros = Math.abs(c.float_drift) > 0.003;
+  return '<div class="' + (gros ? 'warn' : 'muted') + '">Float moyen reel : <b>' +
+    c.actual_avg_float.toFixed(4) + '</b> (prevu ' + c.planned_avg_float.toFixed(4) +
+    ', ecart ' + (c.float_drift >= 0 ? '+' : '') + c.float_drift.toFixed(4) + ')' +
+    (gros ? ' &mdash; verifiez que la sortie n&rsquo;a pas change de palier.' : '') +
+    '</div>';
+}
+
 function carteContrat(c) {
+  const gain = c.planned_profit || 0;
+  return `<div class="mini${colonneDe(c) === 'pret' ? ' fort' : ''}"
+      data-ouvrir="${c.id}" role="button" tabindex="0"
+      title="Ouvrir le contrat">
+    <h3>${c.collection}</h3>
+    <div class="muted">${c.rarity ? c.rarity + ' · ' : ''}dépensé
+      ${c.spent.toFixed(2)} sur ${c.planned_cost.toFixed(2)} prévus · gain prévu
+      ${gain >= 0 ? '+' : ''}${gain.toFixed(2)}</div>
+    ${deriveContrat(c)}
+    <div class="puces">
+      <span class="puce">${ICONE_DATE}${quandContrat(c)}</span>
+      <span class="puce" title="entrées achetées">${ICONE_PANIER}${c.purchased}/10</span>
+    </div></div>`;
+}
+
+function detailContrat(c) {
   const col = colonneDe(c);
-  let quand;
-  if (col === 'fini') {
-    quand = c.status === 'realise' ? 'réalisé' : 'abandonné';
-  } else if (c.craftable) {
-    quand = 'exécutable maintenant';
-  } else if (c.craftable_at) {
-    quand = 'exécutable le ' + dt(c.craftable_at);
-  } else {
-    quand = 'créé le ' + dt(c.created_at);
-  }
-
-  let derive = '';
-  if (c.float_drift !== null && c.float_drift !== undefined) {
-    const gros = Math.abs(c.float_drift) > 0.003;
-    derive = '<div class="' + (gros ? 'warn' : 'muted') + '">Float moyen reel : <b>' +
-      c.actual_avg_float.toFixed(4) + '</b> (prevu ' + c.planned_avg_float.toFixed(4) +
-      ', ecart ' + (c.float_drift >= 0 ? '+' : '') + c.float_drift.toFixed(4) + ')' +
-      (gros ? ' &mdash; verifiez que la sortie n&rsquo;a pas change de palier.' : '') +
-      '</div>';
-  }
-
   const lignes = c.items.map(i => {
     const verrou = i.purchased
       ? (i.locked ? 'jusqu&rsquo;au ' + dt(i.tradable_at) : 'libre')
       : '<span class="muted">non achete</span>';
     const actions = i.purchased
-      ? '<button class="ghost sm" data-item="' + i.id + '" data-act="annuler">Annuler</button>'
+      ? '<button class="ghost sm" data-item="' + i.id + '" data-act="annuler">Annuler l’achat</button>'
       : (i.url ? '<a class="buy" href="' + i.url + '" target="_blank">Acheter</a> ' : '') +
         '<button class="sm" data-item="' + i.id + '" data-act="acheter">Achete</button>';
     return '<tr class="' + (i.purchased ? 'done' : '') + '"><td>' + i.name +
@@ -1895,26 +1933,60 @@ function carteContrat(c) {
   }).join('');
 
   const gain = c.planned_profit || 0;
-  return `<div class="mini${col === 'pret' ? ' fort' : ''}">
-    <h3>${c.collection}</h3>
-    <div class="muted">${c.rarity ? c.rarity + ' · ' : ''}dépensé
-      ${c.spent.toFixed(2)} sur ${c.planned_cost.toFixed(2)} prévus · gain prévu
-      ${gain >= 0 ? '+' : ''}${gain.toFixed(2)}</div>
-    ${derive}
-    <div class="puces">
-      <span class="puce">${ICONE_DATE}${quand}</span>
-      <span class="puce" title="entrées achetées">${ICONE_PANIER}${c.purchased}/10</span>
-    </div>
-    <details><summary>Les objets et les actions</summary>
-      <div class="scroll"><table><thead><tr><th>Objet</th>
-        <th class="num">Float</th><th class="num">Prix</th><th>Verrou</th><th></th>
-        </tr></thead><tbody>${lignes}</tbody></table></div>
-      <div class="row" style="margin:10px 0 0">
-        <button class="ghost sm" data-ct="${c.id}" data-status="realise">Marquer réalisé</button>
-        <button class="ghost sm" data-ct="${c.id}" data-status="abandonne">Abandonner</button>
-        <button class="ghost sm" data-ct="${c.id}" data-del="1">Supprimer</button>
+  const titre = COLONNES.find(([cle]) => cle === col)[1];
+  // Un contrat termine n'a plus a etre marque realise ou abandonne.
+  const statuts = col === 'fini' ? '' : `
+      <button class="ghost" data-ct="${c.id}" data-status="realise">Marquer réalisé</button>
+      <button class="ghost" data-ct="${c.id}" data-status="abandonne">Abandonner</button>`;
+  return `<div class="modale-corps">
+    <div class="tete">
+      <div>
+        <h2>${c.collection} ${c.rarity ? `<span class="tag">${c.rarity}</span>` : ''}</h2>
+        <div class="muted">${titre} · ${quandContrat(c)} · créé le ${dt(c.created_at)}</div>
       </div>
-    </details></div>`;
+    </div>
+    <div class="chiffres">
+      <span>dépensé <b>${c.spent.toFixed(2)}</b></span>
+      <span>coût prévu <b>${c.planned_cost.toFixed(2)}</b></span>
+      <span>gain prévu <b class="${gain >= 0 ? 'pos' : 'neg'}">${gain >= 0 ? '+' : ''}${gain.toFixed(2)}</b></span>
+      <span>entrées achetées <b>${c.purchased}/10</b></span>
+    </div>
+    <div class="bar"><i style="width:${Math.min(100, c.purchased * 10)}%"></i></div>
+    ${deriveContrat(c)}
+    <div class="etape">Les 10 entrées</div>
+    <div class="scroll"><table><thead><tr><th>Objet</th>
+      <th class="num">Float</th><th class="num">Prix</th><th>Verrou</th><th></th>
+      </tr></thead><tbody>${lignes}</tbody></table></div>
+  </div>
+  <div class="modale-pied">
+    <div class="row" style="margin:0">
+      ${statuts}
+      ${c.plan_id ? `<button class="ghost" data-voir="${c.plan_id}">Voir le plan</button>` : ''}
+      <button class="ghost danger" data-ct="${c.id}" data-del="1">Supprimer</button>
+    </div>
+    <button class="ghost neutre" data-fermer="1" autofocus>Annuler</button>
+  </div>`;
+}
+
+function ouvrirContrat(id) {
+  const c = contratsCharges.find(x => x.id === id);
+  if (!c) return;
+  contratOuvert = id;
+  $('#modale').innerHTML = detailContrat(c);
+  if (!$('#modale').open) $('#modale').showModal();
+}
+
+function fermerModale() {
+  contratOuvert = null;
+  if ($('#modale').open) $('#modale').close();
+}
+
+// Apres une action, la modale reste ouverte sur le contrat a jour -- sauf s'il
+// a quitte la liste (supprime, ou termine alors que les termines sont caches).
+function rafraichirModale() {
+  if (!contratOuvert) return;
+  if (contratsCharges.some(x => x.id === contratOuvert)) ouvrirContrat(contratOuvert);
+  else fermerModale();
 }
 
 document.addEventListener('click', async e => {
@@ -1922,6 +1994,7 @@ document.addEventListener('click', async e => {
   if (v) {
     const r = await fetch('/api/plan/' + v.dataset.voir).then(x => x.json());
     if (r.error) { banniere(r.error, true); return; }
+    fermerModale();
     positionListe = window.scrollY;
     document.querySelector('.tab[data-pane="calcul"]').click();
     $('#avancement').innerHTML = boutonRetour();
@@ -1962,7 +2035,8 @@ document.addEventListener('click', async e => {
     }
     await fetch('/api/item', {method: 'POST',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify(corps)});
-    contrats();
+    await contrats();
+    rafraichirModale();
     return;
   }
   const ct = e.target.closest('[data-ct]');
@@ -1974,7 +2048,29 @@ document.addEventListener('click', async e => {
     } else { corps.status = ct.dataset.status; }
     await fetch('/api/contract', {method: 'POST',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify(corps)});
-    contrats();
+    await contrats();
+    rafraichirModale();
+    return;
+  }
+  const ouvrir = e.target.closest('[data-ouvrir]');
+  if (ouvrir) { ouvrirContrat(ouvrir.dataset.ouvrir); return; }
+  // Annuler, ou un clic sur le fond : l'evenement vise alors le <dialog>
+  // lui-meme, pas son contenu.
+  if (e.target.closest('[data-fermer]') || e.target === $('#modale')) {
+    fermerModale();
+  }
+});
+
+// Echap ferme le <dialog> sans passer par fermerModale() : sans cela, la
+// prochaine action rouvrirait un contrat qu'on a quitte.
+$('#modale').addEventListener('close', () => { contratOuvert = null; });
+
+// Une vignette se prend au clavier comme a la souris.
+document.addEventListener('keydown', e => {
+  const ouvrir = e.target.closest && e.target.closest('[data-ouvrir]');
+  if (ouvrir && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    ouvrirContrat(ouvrir.dataset.ouvrir);
   }
 });
 
