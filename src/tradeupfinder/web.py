@@ -896,9 +896,29 @@ PAGE = """<!doctype html>
 --muted:#9aa5b1;--line:#2b3239;--pos:#4ec27e;--neg:#ff6b5e;--warn:#f0b400;
 --warn-bg:#2e2609;--accent:#6ba5ff;}}
 *{box-sizing:border-box}
-body{margin:0;padding:20px 16px 60px;background:var(--bg);color:var(--ink);
+body{margin:0;padding:20px 28px 60px;background:var(--bg);color:var(--ink);
 font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-.wrap{max-width:1000px;margin:0 auto}
+/* Pleine largeur. Les TABLEAUX gagnent a s'etaler -- c'est la que la place
+   sert. La PROSE non : une ligne de 2000 px ne se lit plus, l'oeil perd le
+   debut de la ligne suivante. D'ou la mesure limitee sur les paragraphes
+   seulement, pas sur ce qui les contient. */
+.wrap{max-width:none;margin:0}
+p.muted,.warn{max-width:88ch}
+/* Les cartes se mettent cote a cote des que la largeur le permet, au lieu de
+   laisser la moitie de l'ecran vide sous une colonne unique.
+   Le seuil de 640 px n'est pas esthetique, il est mesure : il donne DEUX
+   colonnes des 1300 px de fenetre, la ou 720 px en laissait une seule jusqu'a
+   1536 px -- soit une carte de 1384 px pour quatre tuiles de chiffres, etiree
+   pour rien. En dessous de 640 px le tableau "comment acheter" passe en
+   defilement horizontal, et un prix hors de l'ecran ne se lit pas.
+   `align-items:start` evite qu'une carte courte s'etire a la hauteur de sa
+   voisine. */
+.grille{display:grid;gap:14px;align-items:start;
+grid-template-columns:repeat(auto-fill,minmax(640px,1fr))}
+.grille>.card{margin-bottom:0}
+/* Un message d'en-tete n'est pas une carte : il tient la LIGNE entiere. Sans
+   cela il occupe une cellule et decale toutes les cartes d'un cran. */
+.grille>p,.grille>.plein{grid-column:1/-1;margin:0}
 h1{font-size:22px;margin:0 0 4px}
 .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
@@ -913,11 +933,25 @@ button:disabled{opacity:.5;cursor:not-allowed}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);
 white-space:nowrap}
+/* Une cellule de PROSE doit revenir a la ligne. Sans ca, le `nowrap` ci-dessus
+   la force sur une seule ligne et pousse tout le tableau en defilement
+   horizontal -- un prix hors de l'ecran ne se lit pas. */
+td.libre{white-space:normal;min-width:20ch}
 th{font-size:12px;color:var(--muted)}
 td.num,th.num{text-align:right}
 tr.pick{cursor:pointer}
 tr.pick:hover{background:var(--warn-bg)}
 tr.sel{outline:2px solid var(--accent);outline-offset:-2px}
+/* Titre a gauche, onglets a droite, sur la meme ligne : la largeur disponible
+   sert a economiser de la HAUTEUR, ce qui remonte les contrats dans l'ecran.
+   En dessous de 760 px les deux repassent l'un sous l'autre. */
+.entete{display:flex;justify-content:space-between;align-items:flex-end;
+gap:20px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
+.entete .sub{margin-bottom:10px}
+.entete .tabs{margin:0;border:0}
+/* Le soulignement de l'onglet actif doit tomber SUR le filet de l'en-tete,
+   sinon il flotte un pixel au-dessus. */
+.entete .tab{margin-bottom:-1px}
 .tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--line)}
 .tab{padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;
 color:var(--muted);font-weight:600}
@@ -964,9 +998,16 @@ margin-top:6px}
 .tete{display:flex;justify-content:space-between;align-items:flex-start;
 gap:16px;flex-wrap:wrap;margin-bottom:10px}
 .tete h2{font-size:17px;margin:0 0 2px}
-.chiffres{display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;
-color:var(--muted);font-size:14px}
-.chiffres b{color:var(--ink);font-variant-numeric:tabular-nums}
+/* Les chiffres qui decident, en tuiles plutot qu'en ligne de texte. Le libelle
+   et la valeur sont deja deux noeuds freres dans le rendu : `flex-direction`
+   suffit a les empiler, sans toucher au HTML. */
+.chiffres{display:grid;gap:10px;margin:14px 0;
+grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.chiffres>span{display:flex;flex-direction:column;gap:1px;padding:9px 12px;
+background:var(--bg);border:1px solid var(--line);border-radius:8px;
+color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+.chiffres b{color:var(--ink);font-variant-numeric:tabular-nums;font-size:20px;
+font-weight:650;text-transform:none;letter-spacing:0}
 .warn.ok{border-left-color:var(--pos)}
 .etape{font-weight:650;margin:18px 0 4px;padding-top:14px;
 border-top:1px solid var(--line)}
@@ -978,15 +1019,18 @@ vertical-align:-2px;margin-right:7px}
 @keyframes s{to{transform:rotate(360deg)}}
 </style></head><body><div id="banniere"></div><div class="wrap">
 
-<h1>TradeUpFinder</h1>
-<div class="sub">Application locale &middot; montants en
-  <b id="devise">…</b> <span id="devise-note"></span>
-  &middot; serveur démarré <b id="demarrage">…</b></div>
-
-<div class="tabs">
-  <div class="tab on" data-pane="calcul">Calculer</div>
-  <div class="tab" data-pane="inventaire">Mon inventaire</div>
-  <div class="tab" data-pane="contrats">Mes contrats</div>
+<div class="entete">
+  <div>
+    <h1>TradeUpFinder</h1>
+    <div class="sub">Application locale &middot; montants en
+      <b id="devise">…</b> <span id="devise-note"></span>
+      &middot; serveur démarré <b id="demarrage">…</b></div>
+  </div>
+  <div class="tabs">
+    <div class="tab on" data-pane="calcul">Calculer</div>
+    <div class="tab" data-pane="inventaire">Mon inventaire</div>
+    <div class="tab" data-pane="contrats">Mes contrats</div>
+  </div>
 </div>
 
 <div class="pane on" id="pane-calcul">
@@ -1010,7 +1054,7 @@ vertical-align:-2px;margin-right:7px}
     <p class="muted" id="cout-balayage">…</p>
   </div>
   <div id="avancement"></div>
-  <div id="resultats"></div>
+  <div id="resultats" class="grille"></div>
 </div>
 
 <div class="pane" id="pane-inventaire">
@@ -1046,7 +1090,7 @@ vertical-align:-2px;margin-right:7px}
       <span class="muted" id="inv-cout"></span>
     </div>
   </div>
-  <div id="inv-sortie"></div>
+  <div id="inv-sortie" class="grille"></div>
 </div>
 
 <div class="pane" id="pane-contrats">
@@ -1057,7 +1101,7 @@ vertical-align:-2px;margin-right:7px}
       <button class="ghost sm" id="rafraichir">Rafraichir</button>
     </div>
   </div>
-  <div id="contrats"></div>
+  <div id="contrats" class="grille"></div>
   <div class="card">
     <div class="etape">Plans calcules</div>
     <p class="muted">Tout plan calcule est conserve : il a coute des requetes.
@@ -1223,32 +1267,32 @@ function voies(p) {
   lignes.push(`<tr><td><b>${achat}</b>, ces 10 annonces</td>
     <td class="num">${p.cost.toFixed(2)}</td>
     <td class="num prof">${profTexte(p.profitability)}</td>
-    <td class="muted">float choisi, disponible tout de suite ·
+    <td class="muted libre">float choisi, disponible tout de suite ·
       <b>verrou 7 jours</b> · non répétable</td></tr>`);
 
   if (p.float_subi_ok === false) {
     lignes.push(`<tr><td><b>Ordre d’achat ${revente}</b></td>
       <td class="num neg">impossible</td><td class="num">—</td>
-      <td class="muted">le float est subi et les sorties changeraient de
+      <td class="muted libre">le float est subi et les sorties changeraient de
         palier : ce contrat exige de choisir les floats</td></tr>`);
   } else if (p.order_budget === null || p.order_budget === undefined) {
     lignes.push(`<tr><td><b>Ordre d’achat ${revente}</b></td>
       <td class="num">—</td><td class="num">—</td>
-      <td class="muted">prix ${revente} indisponible</td></tr>`);
+      <td class="muted libre">prix ${revente} indisponible</td></tr>`);
   } else {
     lignes.push(`<tr><td><b>Ordre d’achat ${revente}</b>
       ${p.order_discount === null || p.order_discount === undefined ? ''
         : `à −${Math.round(p.order_discount * 100)} %`}</td>
       <td class="num">${p.order_budget.toFixed(2)}</td>
       <td class="num prof">visé</td>
-      <td class="muted">float <b>subi</b> · <b>répétable</b>, l’ordre se pose
+      <td class="muted libre">float <b>subi</b> · <b>répétable</b>, l’ordre se pose
         une fois · sans verrou</td></tr>`);
   }
 
   if (p.cost_alt === null || p.cost_alt === undefined) {
     lignes.push(`<tr><td>${revente} au prix affiché</td>
       <td class="num">—</td><td class="num">—</td>
-      <td class="muted">un prix manquait</td></tr>`);
+      <td class="muted libre">un prix manquait</td></tr>`);
   } else {
     const ecart = (p.cost_alt - p.cost) / p.cost;
     const profAlt = p.profitability_alt || 0;
@@ -1257,7 +1301,7 @@ function voies(p) {
       <td class="num">${p.cost_alt.toFixed(2)}
         <span class="muted">${ecart >= 0 ? '+' : ''}${Math.round(ecart * 100)} %</span></td>
       <td class="num ${tient ? 'prof' : 'neg'}">${profTexte(profAlt)}</td>
-      <td class="muted">${tient ? 'sans verrou, mais float subi'
+      <td class="muted libre">${tient ? 'sans verrou, mais float subi'
         : 'sous le point mort — l’écart entre les deux marchés EST la marge'}</td>
       </tr>`);
   }
