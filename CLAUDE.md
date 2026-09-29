@@ -46,7 +46,7 @@ l'utilisateur en lisant un résultat, jamais par l'instance qui venait de les
 écrire.
 
 `gh` n'est pas installé sur la machine de développement. À défaut, l'URL
-`https://github.com/HugoArvis/cs_tradeup_algo/compare/dev...<branche>?expand=1`
+`https://github.com/HugoArvis/tradeupfinder/compare/dev...<branche>?expand=1`
 ouvre la pull request avec la bonne base.
 
 ## Commandes

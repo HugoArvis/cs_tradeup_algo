@@ -13,7 +13,7 @@ les candidats en privilégiant le risque faible.
 
 ```bash
 git clone <url-du-depot>
-cd cs_tradeup_algo
+cd tradeupfinder
 python -m pip install -e ".[dev]"   # PAS `pip install` : voir ci-dessous
 python -m scripts.build_db          # construit data/collections.json (~1450 skins)
 ```
