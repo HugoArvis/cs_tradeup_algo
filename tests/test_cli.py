@@ -388,11 +388,26 @@ def test_le_payload_du_balayage_convertit_tous_les_montants():
         fragile = False
         float_subi_compatible = True
 
+        # Champs que le serialiseur unifie lit aussi ; l'ancien `_plan_payload`
+        # les forcait a None de son cote.
+        exit_loss = None
+        exit_loss_ratio = None
+        price_drop_tolerance = None
+
         def steam_order_budget(self, target_roi=0.20):
             return 12.0 / 1.2
 
         def steam_order_discount(self, target_roi=0.20):
             return 1.0 - (12.0 / 1.2) / 14.0
+
+        def steam_order_lines(self, target_roi=0.20):
+            # 0.04 USD tombe sous le plancher Steam apres conversion, 0.20 non.
+            return (
+                {"name": "A", "quantity": 9, "market_price": 1.0,
+                 "order_price": 0.20, "below_floor": False},
+                {"name": "B", "quantity": 1, "market_price": 0.05,
+                 "order_price": 0.04, "below_floor": False},
+            )
 
     d = cli._plan_payload(FauxPlan(), "EUR", 0.8779)
 
@@ -414,3 +429,13 @@ def test_le_payload_du_balayage_convertit_tous_les_montants():
     assert d["float_subi_ok"] is True
     assert d["order_budget"] == pytest.approx(8.779)
     assert d["order_discount"] == pytest.approx(0.2857, abs=1e-4)
+    # Les prix d'ordre se convertissent comme les autres montants...
+    a, b = d["order_lines"]
+    assert a["order_price"] == pytest.approx(0.1756, abs=1e-4)
+    assert a["market_price"] == pytest.approx(0.8779, abs=1e-4)
+    assert a["quantity"] == 9
+    # ... et le PLANCHER de Steam se rejuge APRES conversion : 0.04 USD vaut
+    # 0.035 EUR, encore au-dessus de 0.03 ; c'est la devise du compte qui
+    # decide si un ordre peut etre place, pas celle du calcul.
+    assert a["below_floor"] is False and b["below_floor"] is False
+    assert b["order_price"] == pytest.approx(0.0351, abs=1e-4)

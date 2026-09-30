@@ -7,7 +7,9 @@ from .scan import scan
 from .scoring import Candidate, Ranking, ScreenConfig, explain, shopping_list
 from .wear import output_float, output_wear, wear_of
 
-__version__ = "0.1.0"
+# Suit les releases GitHub (majeure.mineure.correctif) ; pyproject.toml la lit
+# ici.
+__version__ = "1.1.0"
 
 __all__ = [
     "Candidate",

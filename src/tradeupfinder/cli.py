@@ -24,7 +24,7 @@ from .models import TRADEABLE_INPUT_RARITIES, Rarity, Wear
 from .pricing.cache import QuoteCache
 from .pricing.repository import MarketPricer
 from .pricing.steam import CURRENCIES, SteamMarket
-from .plan import BudgetEpuise, build_plan
+from .plan import BudgetEpuise, build_plan, plan_payload
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
 from .gold import GOLD_INPUT_COUNT, scan_crates
@@ -1429,73 +1429,10 @@ def cmd_sweep(args) -> int:
 def _plan_payload(plan, devise: str, taux: float = 1.0) -> dict:
     """Serialise un plan pour le journal, montants convertis dans `devise`.
 
-    Le calcul se fait en USD de bout en bout -- CSFloat y cote, et la revente
-    Steam y est ramenee par `sell_to_usd`. La conversion vers la devise du
-    compte n'a lieu QU'ICI, une seule fois : convertir en cours de route
-    multiplierait les occasions de melanger les deux.
+    Le contenu vit dans `plan.plan_payload` : il y avait deux serialiseurs, un
+    ici et un dans `web.py`, qui divergeaient champ par champ.
     """
-    r = plan.result
-
-    def c(v):
-        return round(v * taux, 4)
-
-    return {
-        "collection": plan.collection.name,
-        "rarity": plan.rarity.label,
-        "rarity_target": plan.rarity.next_up.label,
-        "currency": devise,
-        # Les entrees sont achetees sur CSFloat, la revente estimee sur Steam.
-        # Sans le dire, un utilisateur verifie les prix d'entree sur Steam et
-        # conclut a une erreur : mesure sur le M4A4 | Zubastick (WW), 0,07 EUR
-        # sur CSFloat contre 0,11 sur Steam. Les deux chiffres sont justes, ce
-        # sont deux marches.
-        "buy_market": "CSFloat",
-        "sell_market": "Steam",
-        # Le meme panier achete sur Steam : dit si le contrat ne tient QUE
-        # grace a l'ecart entre les deux marches.
-        "cost_alt": (c(plan.alt_cost) if plan.alt_cost is not None else None),
-        "profitability_alt": (round(plan.alt_profitability, 4)
-                              if plan.alt_profitability is not None else None),
-        # Le meme panier si trois annonces par objet sont prises avant nous :
-        # separe une occasion d'une course.
-        "cost_deep": (c(plan.deep_cost) if plan.deep_cost is not None else None),
-        "profitability_deep": (round(plan.deep_profitability, 4)
-                               if plan.deep_profitability is not None else None),
-        "fragile": plan.fragile,
-        # La voie ORDRE STEAM : repetable, float subi. Le rabais est ce qu'il
-        # faut obtenir sur le prix affiche pour tenir +20 % de rendement.
-        "float_subi_ok": plan.float_subi_compatible,
-        "order_budget": (c(plan.steam_order_budget())
-                         if plan.steam_order_budget() is not None else None),
-        "order_discount": (round(plan.steam_order_discount(), 4)
-                           if plan.steam_order_discount() is not None else None),
-        "cost": c(r.cost), "net": c(r.ev_net),
-        "profit": c(r.ev_profit), "roi": round(r.roi, 4),
-        "profitability": round(r.profitability, 4),
-        "win_probability": round(r.profit_probability, 4),
-        "outcomes_count": r.distinct_outcomes,
-        "stdev": c(r.stdev),
-        "avg_float": round(r.avg_input_float, 5),
-        "listings_examined": plan.listings_examined,
-        "float_slack": round(plan.float_slack, 5),
-        "worst_profit": (c(plan.worst_profit)
-                         if plan.worst_profit is not None else None),
-        "best_profit": (c(plan.best_profit)
-                        if plan.best_profit is not None else None),
-        "all_profitable": plan.all_outcomes_profitable,
-        "replis": plan.replis,
-        "downgrade_profit": (c(plan.downgrade_profit)
-                             if plan.downgrade_profit is not None else None),
-        "exit_loss": None, "exit_loss_ratio": None,
-        "price_drop_tolerance": None,
-        "inputs": [{"name": o.name, "float": round(o.float_value, 4),
-                    "price": c(o.unit_cost), "url": o.url}
-                   for o in sorted(plan.options,
-                                   key=lambda o: (o.skin.name, o.float_value))],
-        "outcomes": [{"name": o.name, "probability": round(o.probability, 4),
-                      "float": round(o.float_value, 4),
-                      "net": c(o.net_value)} for o in r.outcomes],
-    }
+    return plan_payload(plan, devise, lambda v: round(v * taux, 4))
 
 
 #: Seuil mesure le 28 septembre 2026 sur The Arabesque Collection : en dessous

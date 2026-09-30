@@ -524,3 +524,54 @@ def test_un_plan_non_cote_ne_fait_pas_sauter_la_collection_suivante(app, monkeyp
 
     # Les DEUX collections doivent avoir ete tentees, pas une seule.
     assert len(batch.failed) == 2, f"file mal depilee : {batch.failed}"
+
+
+# --- Structure de la page ------------------------------------------------------
+# Un onglet dont le panneau manque n'est pas une erreur JavaScript : le clic
+# fonctionne, tous les panneaux se ferment, et l'ecran reste vide. Rien ne le
+# signale. L'inverse -- un panneau sans onglet -- est du code mort inatteignable.
+
+
+def test_chaque_onglet_a_son_panneau_et_reciproquement():
+    import re
+
+    from tradeupfinder.web import PAGE
+
+    onglets = set(re.findall(r'data-pane="(\w+)"', PAGE))
+    panneaux = set(re.findall(r'id="pane-(\w+)"', PAGE))
+    assert onglets == panneaux, (
+        f"onglets sans panneau : {sorted(onglets - panneaux)} ; "
+        f"panneaux sans onglet : {sorted(panneaux - onglets)}"
+    )
+
+
+def test_les_ordres_dachat_vivent_dans_la_carte_pas_dans_un_onglet():
+    """Un panier d'annonces ne se repete pas, un ordre d'achat si : les deux
+    voies doivent donc se lire au meme endroit, sur le contrat. L'onglet separe
+    refaisait tout le calcul et obligeait a comparer de tete."""
+    from tradeupfinder.web import PAGE
+
+    assert "pane-ordres" not in PAGE
+    assert "/api/orders" not in PAGE
+    # Le rendu des ordres est bien dans la carte.
+    assert "function detailOrdres(" in PAGE
+    # Et il n'y a plus qu'UN tableau de prix, non deux qui se recouvrent.
+    assert "function voies(" in PAGE
+    assert "function comparatif(" not in PAGE and "function deuxVoies(" not in PAGE
+
+
+def test_une_grille_suivie_de_contenu_garde_un_espace_en_dessous():
+    """Les cartes d'une grille perdent leur marge -- c'est la gouttiere qui les
+    espace. Mais la gouttiere n'espace pas la grille de ce qui la SUIT : sans
+    marge propre, le dernier contrat suivi colle au bloc d'historique. Rien
+    d'autre ne detecte ce genre de defaut, il ne se voit qu'a l'ecran.
+    """
+    import re
+
+    from tradeupfinder.web import PAGE
+
+    css = re.search(r"<style>(.*?)</style>", PAGE, re.S).group(1)
+    assert re.search(r"\.grille>\.card\{[^}]*margin-bottom:0", css), \
+        "les cartes d'une grille devraient perdre leur marge"
+    assert re.search(r"\.grille[^{]*\{[^}]*margin-bottom:\s*(?!0)", css), \
+        "la grille elle-meme doit garder un espace sous elle"

@@ -42,9 +42,8 @@ from .inventory import (
 from .journal import Journal
 from .models import Rarity
 from .fees import STEAM
-from .plan import CSFloatPricer, Plan, build_plan
+from .plan import CSFloatPricer, Plan, build_plan, plan_payload
 from .pricing.cache import QuoteCache
-from .pricing.repository import MarketPricer
 from .pricing.csfloat import CSFloat
 from .pricing.http import RateLimited
 from .pricing.steam import SteamMarket
@@ -210,72 +209,6 @@ class App:
                     self.currency = devise
         except Exception:  # noqa: BLE001 - la conversion est un confort
             log.warning("Devise du compte indisponible, affichage en USD")
-
-    def ordres(self, rarity_name: str, *, target_roi: float = 0.20) -> dict:
-        """Les ORDRES D'ACHAT a placer, plutot que des annonces a cliquer.
-
-        Un panier d'annonces ne se repete pas : chaque annonce est unique, et
-        le lendemain il faut tout rechercher. Un ordre d'achat, lui, se pose
-        une fois et se remplit tout seul -- c'est la seule forme exploitable
-        quand on veut refaire le meme contrat.
-
-        Lu sur le CACHE : aucune requete, donc reponse immediate. Les prix
-        viennent du balayage de nuit, et leur age est renvoye pour que
-        l'interface puisse le dire.
-        """
-        from .orders import scan_orders
-
-        # Sans ca, `self.currency` vaut son defaut "USD" tant que le compte
-        # n'a pas repondu -- et le cache, indexe par devise, ne rend alors
-        # AUCUNE cotation. Zero ordre, sans la moindre erreur.
-        self.load_currency()
-        rarity = RARITES[rarity_name]
-        cache = QuoteCache(ttl_seconds=720 * 3600)
-        steam = SteamMarket(currency=self.currency, cache=cache, offline=True,
-                            ttl_seconds=720 * 3600)
-        pricer = MarketPricer(steam, steam, buy_fees="steam", sell_fees="steam",
-                              safety_margin=0.05, min_input_volume=3,
-                              price_basis="sales")
-        try:
-            plans = scan_orders(self.db, rarity, pricer, target_roi=target_roi)
-        finally:
-            ages = pricer.quote_age()
-            cache.close()
-
-        return {
-            # Le marche est celui ou l'ordre se PLACE. Steam est le seul des
-            # deux a accepter un ordre sur une usure sans choisir le float --
-            # et c'est precisement ce que la strategie repetable demande.
-            "market": "Steam Community Market",
-            "currency": self.currency,
-            "target_roi": target_roi,
-            "age_hours": round(ages[0] / 3600, 1) if ages else None,
-            "plans": [
-                {
-                    "collection": p.collection.name,
-                    "rarity": p.rarity.label,
-                    "rarity_target": p.rarity.next_up.label,
-                    "ev_net": round(p.ev_net, 2),
-                    "market_cost": round(p.market_cost, 2),
-                    "budget": round(p.budget, 2),
-                    "discount": round(p.discount, 4),
-                    "feasible": p.feasible(),
-                    "win_probability": round(p.result.profit_probability, 4),
-                    "outcomes": p.result.distinct_outcomes,
-                    "lines": [
-                        {
-                            "name": l.name, "quantity": l.quantity,
-                            "market_price": round(l.market_price, 2),
-                            "order_price": round(l.order_price, 2),
-                            "discount": round(l.discount, 4),
-                            "below_floor": l.below_floor,
-                        }
-                        for l in p.lines
-                    ],
-                }
-                for p in plans
-            ],
-        }
 
     def revente(self) -> SteamMarket:
         """Marche de revente des sorties, partage par tous les calculs.
@@ -654,83 +587,12 @@ class App:
         return base
 
     def _plan_dict(self, plan: Plan) -> dict:
-        """Serialise un plan, montants convertis dans la devise du compte."""
-        p, r = plan, plan.result
-        return {
-            "collection": p.collection.name,
-            # Une meme collection donne un plan different par rarete : sans
-            # elle, deux lignes de l'historique sont indiscernables.
-            "rarity": p.rarity.label,
-            "rarity_target": p.rarity.next_up.label,
-            "currency": self.currency,
-            "cost": self.conv(r.cost),
-            "net": self.conv(r.ev_net),
-            "profit": self.conv(r.ev_profit),
-            "roi": round(r.roi, 4),
-            # Convention des guides : 1.0 = point mort, pas le profit.
-            "profitability": round(r.profitability, 4),
-            "win_probability": round(r.profit_probability, 4),
-            "outcomes_count": r.distinct_outcomes,
-            "stdev": self.conv(r.stdev),
-            "avg_float": round(r.avg_input_float, 5),
-            "listings_examined": p.listings_examined,
-            "float_slack": round(p.float_slack, 5),
-            "downgrade_profit": (
-                self.conv(p.downgrade_profit) if p.downgrade_profit is not None else None
-            ),
-            "worst_profit": (
-                self.conv(p.worst_profit) if p.worst_profit is not None else None
-            ),
-            "best_profit": (
-                self.conv(p.best_profit) if p.best_profit is not None else None
-            ),
-            "all_profitable": p.all_outcomes_profitable,
-            "replis": p.replis,
-            "buy_market": "CSFloat",
-            "sell_market": "Steam",
-            "cost_alt": (self.conv(p.alt_cost) if p.alt_cost is not None else None),
-            "profitability_alt": (round(p.alt_profitability, 4)
-                                  if p.alt_profitability is not None else None),
-            "cost_deep": (self.conv(p.deep_cost)
-                          if p.deep_cost is not None else None),
-            "profitability_deep": (round(p.deep_profitability, 4)
-                                   if p.deep_profitability is not None else None),
-            "fragile": p.fragile,
-            "float_subi_ok": p.float_subi_compatible,
-            "order_budget": (self.conv(p.steam_order_budget())
-                             if p.steam_order_budget() is not None else None),
-            "order_discount": (round(p.steam_order_discount(), 4)
-                               if p.steam_order_discount() is not None else None),
-            "exit_loss": (
-                self.conv(p.exit_loss) if p.exit_loss is not None else None
-            ),
-            "exit_loss_ratio": (
-                round(p.exit_loss_ratio, 4) if p.exit_loss_ratio is not None else None
-            ),
-            "price_drop_tolerance": (
-                round(p.price_drop_tolerance, 4)
-                if p.price_drop_tolerance is not None
-                else None
-            ),
-            "inputs": [
-                {
-                    "name": o.name,
-                    "float": round(o.float_value, 4),
-                    "price": self.conv(o.unit_cost),
-                    "url": o.url,
-                }
-                for o in sorted(p.options, key=lambda o: (o.skin.name, o.float_value))
-            ],
-            "outcomes": [
-                {
-                    "name": o.name,
-                    "probability": round(o.probability, 4),
-                    "float": round(o.float_value, 4),
-                    "net": self.conv(o.net_value),
-                }
-                for o in r.outcomes
-            ],
-        }
+        """Serialise un plan, montants convertis dans la devise du compte.
+
+        Le contenu vit dans `plan.plan_payload` : il y avait deux serialiseurs,
+        un ici et un dans `cli.py`, qui divergeaient champ par champ.
+        """
+        return plan_payload(plan, self.currency, self.conv)
 
     def contract_payload(self, c) -> dict:
         """Etat d'un contrat : le REEL confronte a ce qui etait prevu.
@@ -860,15 +722,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "calcul inconnu"}, 404)
                 return
             self._json(self.app.inventory_job_payload(job))
-        elif route.path == "/api/orders":
-            rarity = (params.get("rarity") or ["industrial"])[0]
-            if rarity not in RARITES:
-                self._json({"error": "rarete inconnue"}, 400)
-                return
-            try:
-                self._json(self.app.ordres(rarity))
-            except Exception as exc:  # noqa: BLE001
-                self._json({"error": str(exc)}, 500)
         elif route.path == "/api/latest":
             # Ce que la nuit a trouve. Aucune requete, aucune attente : un
             # balayage complet dure plus d'une heure, il n'a pas a etre refait
@@ -1038,18 +891,166 @@ PAGE = """<!doctype html>
 <title>TradeUpFinder</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--muted:#5b6673;--line:#e2e6eb;
---pos:#0f7a3d;--neg:#b3261e;--warn:#8a5a00;--warn-bg:#fff6e0;--accent:#1a56b0;}
+--pos:#0f7a3d;--neg:#b3261e;--warn:#8a5a00;--warn-bg:#fff6e0;--accent:#1a56b0;
+--band:#edf2fa;}
 @media(prefers-color-scheme:dark){:root{--bg:#14171b;--card:#1c2126;--ink:#e8ecf1;
 --muted:#9aa5b1;--line:#2b3239;--pos:#4ec27e;--neg:#ff6b5e;--warn:#f0b400;
---warn-bg:#2e2609;--accent:#6ba5ff;}}
+--warn-bg:#2e2609;--accent:#6ba5ff;--band:#1a2230;}}
 *{box-sizing:border-box}
-body{margin:0;padding:20px 16px 60px;background:var(--bg);color:var(--ink);
+body{margin:0;background:var(--bg);color:var(--ink);
 font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-.wrap{max-width:1000px;margin:0 auto}
+/* --- Mise en page : menu lateral + contenu --- */
+/* Les onglets passent dans une colonne fixe a gauche : ils restent visibles
+   quel que soit le defilement, et l'en-tete ne mange plus de hauteur. */
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;
+padding:22px 14px 18px;background:var(--card);border-right:1px solid var(--line)}
+.marque{display:flex;align-items:center;gap:9px;font-size:18px;font-weight:750;
+padding:0 10px 22px;letter-spacing:-.01em}
+.marque svg{width:22px;height:22px;color:var(--accent)}
+.side .tabs{flex-direction:column;gap:2px;margin:0;border:0}
+.side .tab{display:flex;align-items:center;gap:10px;padding:8px 10px;border:0;
+border-radius:8px;font-weight:550}
+.side .tab:hover{background:var(--bg);color:var(--ink)}
+.side .tab.on{background:var(--bg);color:var(--ink)}
+.tab svg{width:17px;height:17px;flex:none}
+.compte{margin-left:auto;min-width:22px;padding:0 6px;border:1px solid var(--line);
+border-radius:10px;font-size:12px;text-align:center;color:var(--muted)}
+.compte:empty{display:none}
+.side-pied{margin-top:auto;padding:14px 10px 0;border-top:1px solid var(--line);
+font-size:12px;color:var(--muted);line-height:1.7}
+.side-pied b{color:var(--ink)}
+.main{padding:0 28px 60px}
+/* Le bandeau teinte porte la barre d'outils ET les chiffres de l'onglet : ce
+   qu'on regarde en premier, avant le detail des cartes. */
+.bandeau{background:var(--band);margin:0 -28px 22px;padding:18px 28px 26px;
+border-bottom:1px solid var(--line)}
+.barre{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.barre h1{flex:1;margin:0}
+.barre label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px}
+.stats{display:grid;gap:28px;align-items:end;
+grid-template-columns:minmax(240px,1.5fr) minmax(200px,1fr) repeat(2,minmax(140px,.8fr))}
+.stats .titre{font-weight:600;margin-bottom:10px}
+.graphe{display:flex;align-items:flex-end;gap:10px;height:104px;
+border-bottom:1px solid var(--line)}
+.graphe .col-b{flex:1;max-width:26px;display:flex;flex-direction:column;
+justify-content:flex-end;height:100%;text-align:center}
+.graphe i{display:block;border-radius:3px 3px 0 0;background:var(--accent)}
+/* Hachure : le tirage peut faire perdre. Barre pleine : toutes les sorties
+   sont rentables. La difference se lit sans legende a cote de chaque barre. */
+.graphe i.hach{background:repeating-linear-gradient(135deg,var(--accent) 0 1.5px,
+transparent 1.5px 5px);border:1px solid var(--accent);border-bottom:0}
+.graphe-lab{display:flex;gap:10px;margin-top:5px}
+.graphe-lab span{flex:1;max-width:26px;font-size:11px;color:var(--muted);
+text-align:center;overflow:hidden;white-space:nowrap}
+.cadran{text-align:center}
+/* Le chiffre se pose dans le creux de l'arc, le libelle SOUS l'arc : dans le
+   creux, un libelle long touche les graduations des extremites. */
+.cadran .arc{position:relative;max-width:230px;margin:0 auto}
+.cadran svg{width:100%;display:block}
+.cadran .val{position:absolute;left:0;right:0;bottom:2px;font-size:28px;
+font-weight:600;line-height:1}
+.cadran .lab{font-size:13px;color:var(--muted);margin-top:8px}
+.stat .val{font-size:34px;font-weight:600;letter-spacing:-.02em;line-height:1.1;
+font-variant-numeric:tabular-nums}
+.stat .lab{display:flex;align-items:flex-end;gap:18px;
+margin-top:26px;font-size:13px;color:var(--muted)}
+.stat a{color:var(--ink);text-decoration:none;font-size:18px}
+.vide{color:var(--muted);font-size:13px;align-self:center}
+/* --- Calendrier des deblocages (onglet Mes contrats) --- */
+.stats.agenda{grid-template-columns:minmax(340px,2.2fr) repeat(3,minmax(140px,.8fr))}
+.calendrier{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}
+.jour{display:flex;flex-direction:column;align-items:center;gap:4px;min-height:96px;
+padding:6px 4px 8px;background:var(--card);border:1px solid var(--line);
+border-radius:8px;text-align:center}
+.jour.auj{border-color:var(--accent)}
+.jour-nom{font-size:11px;color:var(--muted);text-transform:uppercase}
+.jour-num{font-size:16px;font-weight:650}
+.deblo{display:block;width:100%;padding:1px 3px;border-radius:4px;font-size:11px;
+background:var(--accent);color:var(--card);cursor:pointer;overflow:hidden;
+white-space:nowrap;text-overflow:ellipsis}
+/* --- Colonnes de suivi des contrats --- */
+.kanban{display:grid;gap:18px;align-items:start;margin-bottom:22px;
+grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.kanban>.card{grid-column:1/-1}
+.colonne{display:flex;flex-direction:column;gap:12px;min-width:0}
+.colonne-tete{display:flex;justify-content:space-between;align-items:center}
+.colonne-tete h2{font-size:19px;font-weight:600;margin:0}
+.nb{padding:1px 9px;border:1px solid var(--line);border-radius:6px;font-size:13px;
+background:var(--card)}
+.mini{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:14px 16px}
+.mini h3{font-size:15px;margin:0 0 6px}
+.mini .muted{font-size:13px}
+.mini details{margin-top:10px}
+/* La carte foncee de la maquette : reservee au contrat qui demande d'AGIR. */
+.mini.fort{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.mini.fort .muted,.mini.fort th{color:var(--card);opacity:.72}
+.mini.fort summary{color:var(--card)}
+.mini.fort .puce{border-color:rgba(127,127,127,.45)}
+.mini[data-ouvrir]{cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.mini[data-ouvrir]:hover,.mini[data-ouvrir]:focus-visible{border-color:var(--accent);
+box-shadow:0 3px 14px rgba(0,0,0,.10);outline:none}
+/* --- Modale d'un contrat --- */
+dialog.modale{width:min(940px,calc(100vw - 32px));max-height:calc(100vh - 48px);
+padding:0;border:1px solid var(--line);border-radius:14px;background:var(--card);
+color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.3)}
+dialog.modale::backdrop{background:rgba(12,16,24,.5)}
+.modale-corps{padding:22px 24px 8px}
+.modale-corps h2{font-size:20px;margin:0 0 4px}
+/* Les actions restent a portee quand la liste des objets defile. */
+.modale-pied{position:sticky;bottom:0;display:flex;justify-content:space-between;
+align-items:center;gap:12px;flex-wrap:wrap;padding:14px 24px;
+background:var(--bg);border-top:1px solid var(--line)}
+.colonne-vide{border:1px dashed var(--line);border-radius:12px;padding:14px 16px;
+color:var(--muted);font-size:13px}
+.puces{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.puce{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;font-size:12px;
+border:1px solid var(--line);border-radius:6px;white-space:nowrap}
+.puce svg{width:13px;height:13px}
+@media(max-width:860px){
+.app{grid-template-columns:1fr}
+.side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;
+align-items:center;gap:8px;padding:12px 16px;border-right:0;
+border-bottom:1px solid var(--line)}
+.marque{padding:0 10px 0 0}
+.side .tabs{flex-direction:row;flex-wrap:wrap}
+.side-pied{display:none}
+.main{padding:0 16px 40px}
+.bandeau{margin:0 -16px 18px;padding:16px}
+.stats,.stats.agenda{grid-template-columns:1fr 1fr}
+.stats.agenda>div:first-child{grid-column:1/-1}
+}
+/* Pleine largeur. Les TABLEAUX gagnent a s'etaler -- c'est la que la place
+   sert. La PROSE non : une ligne de 2000 px ne se lit plus, l'oeil perd le
+   debut de la ligne suivante. D'ou la mesure limitee sur les paragraphes
+   seulement, pas sur ce qui les contient. */
+.wrap{max-width:none;margin:0}
+p.muted,.warn{max-width:88ch}
+/* Les cartes se mettent cote a cote des que la largeur le permet, au lieu de
+   laisser la moitie de l'ecran vide sous une colonne unique.
+   Le seuil de 640 px n'est pas esthetique, il est mesure : il donne DEUX
+   colonnes des 1300 px de fenetre, la ou 720 px en laissait une seule jusqu'a
+   1536 px -- soit une carte de 1384 px pour quatre tuiles de chiffres, etiree
+   pour rien. En dessous de 640 px le tableau "comment acheter" passe en
+   defilement horizontal, et un prix hors de l'ecran ne se lit pas.
+   `align-items:start` evite qu'une carte courte s'etire a la hauteur de sa
+   voisine. */
+.grille{display:grid;gap:14px;align-items:start;
+grid-template-columns:repeat(auto-fill,minmax(640px,1fr))}
+.grille>.card{margin-bottom:0}
+/* La gouttiere de la grille espace les cartes ENTRE elles, pas la grille de ce
+   qui la suit. Comme les cartes y perdent leur marge, le dernier contrat suivi
+   collait au bloc d'historique juste en dessous. `:not(:empty)` evite un espace
+   fantome quand il n'y a aucun contrat a afficher. */
+.grille:not(:empty){margin-bottom:14px}
+/* Un message d'en-tete n'est pas une carte : il tient la LIGNE entiere. Sans
+   cela il occupe une cellule et decale toutes les cartes d'un cran. */
+.grille>p,.grille>.plein{grid-column:1/-1;margin:0}
 h1{font-size:22px;margin:0 0 4px}
 .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
-padding:16px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:18px;margin-bottom:14px}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
 select,input{padding:7px 10px;border:1px solid var(--line);border-radius:7px;
 background:var(--card);color:var(--ink);font:inherit}
@@ -1060,6 +1061,10 @@ button:disabled{opacity:.5;cursor:not-allowed}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);
 white-space:nowrap}
+/* Une cellule de PROSE doit revenir a la ligne. Sans ca, le `nowrap` ci-dessus
+   la force sur une seule ligne et pousse tout le tableau en defilement
+   horizontal -- un prix hors de l'ecran ne se lit pas. */
+td.libre{white-space:normal;min-width:20ch}
 th{font-size:12px;color:var(--muted)}
 td.num,th.num{text-align:right}
 tr.pick{cursor:pointer}
@@ -1072,11 +1077,21 @@ color:var(--muted);font-weight:600}
 .pane{display:none}.pane.on{display:block}
 button.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
 button.sm{padding:3px 10px;font-size:13px}
+button.retour{margin-bottom:14px;background:var(--card)}
+button.danger{color:var(--neg)}
+button.neutre{color:var(--ink);background:var(--card)}
 tr.done td{opacity:.55}
 .bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
 .bar>i{display:block;height:100%;background:var(--accent)}
 .tag{display:inline-block;padding:1px 7px;border-radius:20px;font-size:12px;
 background:var(--warn-bg);color:var(--warn);font-weight:600}
+/* Une bonne nouvelle ne merite pas un bandeau : un bandeau se lit comme une
+   alerte, et trois bandeaux d'affilee ne se lisent plus du tout. Le detail
+   passe en `title`, disponible sans occuper la page. */
+.tag.ok{background:transparent;color:var(--pos);border:1px solid var(--pos)}
+.tag[title]{cursor:help}
+.marques{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+.marques:empty{display:none}
 .kpis{display:flex;gap:20px;flex-wrap:wrap}
 .kpi{flex:1 1 120px}
 .kpi .lab{color:var(--muted);font-size:12px;text-transform:uppercase}
@@ -1104,9 +1119,16 @@ margin-top:6px}
 .tete{display:flex;justify-content:space-between;align-items:flex-start;
 gap:16px;flex-wrap:wrap;margin-bottom:10px}
 .tete h2{font-size:17px;margin:0 0 2px}
-.chiffres{display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;
-color:var(--muted);font-size:14px}
-.chiffres b{color:var(--ink);font-variant-numeric:tabular-nums}
+/* Les chiffres qui decident, en tuiles plutot qu'en ligne de texte. Le libelle
+   et la valeur sont deja deux noeuds freres dans le rendu : `flex-direction`
+   suffit a les empiler, sans toucher au HTML. */
+.chiffres{display:grid;gap:10px;margin:14px 0;
+grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.chiffres>span{display:flex;flex-direction:column;gap:1px;padding:9px 12px;
+background:var(--bg);border:1px solid var(--line);border-radius:8px;
+color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+.chiffres b{color:var(--ink);font-variant-numeric:tabular-nums;font-size:20px;
+font-weight:650;text-transform:none;letter-spacing:0}
 .warn.ok{border-left-color:var(--pos)}
 .etape{font-weight:650;margin:18px 0 4px;padding-top:14px;
 border-top:1px solid var(--line)}
@@ -1116,28 +1138,44 @@ summary{cursor:pointer;color:var(--accent);font-size:13px}
 border-top-color:var(--accent);border-radius:50%;animation:s .8s linear infinite;
 vertical-align:-2px;margin-right:7px}
 @keyframes s{to{transform:rotate(360deg)}}
-</style></head><body><div id="banniere"></div><div class="wrap">
+</style></head><body><div id="banniere"></div><div class="app">
 
-<h1>TradeUpFinder</h1>
-<div class="sub">Application locale &middot; montants en
-  <b id="devise">…</b> <span id="devise-note"></span>
-  &middot; serveur démarré <b id="demarrage">…</b></div>
+<aside class="side">
+  <div class="marque">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6 4 4 6-8"/>
+      <path d="M15 7h5v5"/></svg>
+    TradeUpFinder
+  </div>
+  <nav class="tabs">
+    <div class="tab on" data-pane="calcul">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/>
+        <path d="M7 15l4-4 3 3 5-6"/></svg>
+      Calculer <span class="compte" id="nb-calcul"></span></div>
+    <div class="tab" data-pane="inventaire">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18"
+        height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      Mon inventaire</div>
+    <div class="tab" data-pane="contrats">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5"
+        height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/>
+        <rect x="17" y="4" width="4" height="7" rx="1.5"/></svg>
+      Mes contrats <span class="compte" id="nb-contrats"></span></div>
+  </nav>
+  <div class="side-pied">Application locale<br>
+    montants en <b id="devise">…</b> <span id="devise-note"></span><br>
+    serveur démarré <b id="demarrage">…</b></div>
+</aside>
 
-<div class="tabs">
-  <div class="tab on" data-pane="calcul">Calculer</div>
-  <div class="tab" data-pane="ordres">Ordres d’achat</div>
-  <div class="tab" data-pane="inventaire">Mon inventaire</div>
-  <div class="tab" data-pane="histo">Historique des plans</div>
-  <div class="tab" data-pane="contrats">Mes contrats</div>
-</div>
+<main class="main">
 
 <div class="pane on" id="pane-calcul">
-  <div class="card">
-    <p class="muted">Le modèle cote chaque collection de la rareté choisie et
-    ne garde que les contrats <b>rentables</b> : ceux dont la revente attendue
-    dépasse ce que les dix entrées coûtent. Les autres ne sont pas affichés —
-    il n’y a rien à en faire.</p>
-    <div class="row">
+  <section class="bandeau">
+    <div class="barre">
+      <h1>Contrats rentables</h1>
       <label>Rareté d’entrée
         <select id="rarity">
           <option value="consumer">Consumer</option>
@@ -1149,46 +1187,21 @@ vertical-align:-2px;margin-right:7px}
       </label>
       <button id="chercher">Relancer maintenant (plus d’1 h)</button>
     </div>
-    <p class="muted" id="cout-balayage">…</p>
-  </div>
+    <div class="stats" id="stats-calcul"></div>
+  </section>
+  <p class="muted">Le modèle cote chaque collection de la rareté choisie et
+  ne garde que les contrats <b>rentables</b> : ceux dont la revente attendue
+  dépasse ce que les dix entrées coûtent. Les autres ne sont pas affichés —
+  il n’y a rien à en faire. <span id="cout-balayage">…</span></p>
   <div id="avancement"></div>
-  <div id="resultats"></div>
-</div>
-
-<div class="pane" id="pane-ordres">
-  <div class="card">
-    <p class="muted">Un panier d’annonces ne se répète pas : chaque annonce est
-    unique, et le lendemain il faut tout rechercher. Un <b>ordre d’achat</b> se
-    pose une fois et se remplit tout seul — c’est la forme exploitable quand on
-    veut <b>refaire</b> le même contrat. Le calcul est renversé : au lieu de
-    partir du prix du marché, il déduit le <b>prix maximal</b> que chaque entrée
-    peut coûter pour que le contrat tienne.</p>
-    <div class="row">
-      <label>Rareté d’entrée
-        <select id="ord-rarity">
-          <option value="consumer">Consumer</option>
-          <option value="industrial" selected>Industrial</option>
-          <option value="mil-spec">Mil-Spec</option>
-          <option value="restricted">Restricted</option>
-          <option value="classified">Classified</option>
-        </select>
-      </label>
-      <button class="ghost" id="ord-relire">Relire</button>
-      <span class="muted">lecture du cache : instantané, aucune requête</span>
-    </div>
-  </div>
-  <div id="ord-sortie"></div>
+  <div id="resultats" class="grille"></div>
 </div>
 
 <div class="pane" id="pane-inventaire">
-  <div class="card">
-    <p class="muted">Contrats realisables avec les skins que vous possedez deja.
-    Les entrees sont valorisees a ce qu'elles rapporteraient <b>revendues</b> :
-    fondre un skin, c'est renoncer a le vendre. Le prix que vous l'avez paye
-    n'entre pas dans le calcul &mdash; il est deja depense quoi que vous
-    decidiez.</p>
-    <div class="row">
-      <label>Rarete d'entree
+  <section class="bandeau">
+    <div class="barre" style="margin-bottom:0">
+      <h1>Mon inventaire</h1>
+      <label>Rareté d’entrée
         <select id="inv-rarity">
           <option value="consumer">Consumer</option>
           <option value="industrial">Industrial</option>
@@ -1207,20 +1220,38 @@ vertical-align:-2px;margin-right:7px}
       </label>
       <button class="ghost sm" id="inv-relire">Relire l'inventaire</button>
     </div>
+  </section>
+  <div class="card">
+    <p class="muted">Contrats realisables avec les skins que vous possedez deja.
+    Les entrees sont valorisees a ce qu'elles rapporteraient <b>revendues</b> :
+    fondre un skin, c'est renoncer a le vendre. Le prix que vous l'avez paye
+    n'entre pas dans le calcul &mdash; il est deja depense quoi que vous
+    decidiez.</p>
     <div id="inv-bilan" class="muted">chargement&hellip;</div>
-    <div class="row" style="border-top:1px solid var(--line);padding-top:12px">
+    <div class="row" style="border-top:1px solid var(--line);padding-top:12px;
+      margin:12px 0 0">
       <button id="inv-calculer" disabled>Calculer</button>
       <span class="muted" id="inv-cout"></span>
     </div>
   </div>
-  <div id="inv-sortie"></div>
+  <div id="inv-sortie" class="grille"></div>
 </div>
 
-<div class="pane" id="pane-histo">
+<div class="pane" id="pane-contrats">
+  <section class="bandeau">
+    <div class="barre">
+      <h1>Mes contrats</h1>
+      <label><input type="checkbox" id="tous"> afficher aussi les terminés</label>
+      <button class="ghost sm" id="rafraichir">Rafraîchir</button>
+    </div>
+    <div class="stats agenda" id="stats-contrats"></div>
+  </section>
+  <div id="contrats" class="kanban"></div>
   <div class="card">
-    <p class="muted">Tout plan calcule est conserve ici : il a coute des requetes,
-    autant pouvoir le retrouver. &laquo;&nbsp;Suivre&nbsp;&raquo; en fait un contrat
-    auquel rattacher vos achats reels.</p>
+    <div class="etape">Plans calcules</div>
+    <p class="muted">Tout plan calcule est conserve : il a coute des requetes.
+    &laquo;&nbsp;Suivre&nbsp;&raquo; en fait un contrat auquel rattacher vos
+    achats reels.</p>
     <div class="scroll"><table>
       <thead><tr><th>Date</th><th>Collection</th><th class="num">Cout</th>
         <th class="num">Profit</th><th class="num">Rendement</th>
@@ -1230,13 +1261,9 @@ vertical-align:-2px;margin-right:7px}
   </div>
 </div>
 
-<div class="pane" id="pane-contrats">
-  <div class="row">
-    <label><input type="checkbox" id="tous"> afficher aussi les contrats termines</label>
-    <button class="ghost sm" id="rafraichir">Rafraichir</button>
-  </div>
-  <div id="contrats"></div>
-</div>
+<dialog id="modale" class="modale" aria-label="Détail du contrat"></dialog>
+
+</main>
 </div>
 
 <script>
@@ -1258,6 +1285,129 @@ function profTexte(p) { return Math.round((p || 0) * 100) + '%'; }
 function jauge(p) {
   const pct = Math.min(100, ((p || 0) / 2) * 100);
   return '<div class="jauge"><i style="width:' + pct + '%"></i></div>';
+}
+
+// --- Bandeau de chiffres ----------------------------------------------------
+// Un histogramme, un cadran, deux grands chiffres : ce qu'on lit avant d'entrer
+// dans le detail des cartes. Chaque zone se rend a part, avec des donnees deja
+// en memoire -- le bandeau ne coute aucune requete.
+
+function nomCourt(nom) {
+  return String(nom || '').replace(/^The /, '').replace(/ Collection$/, '');
+}
+
+// `barres` : [{valeur (0 a 1), plein, lab, titre}].
+function graphe(titre, barres) {
+  if (!barres.length) {
+    return `<div><div class="titre">${titre}</div>
+      <div class="vide">rien à afficher pour l’instant</div></div>`;
+  }
+  const hauteur = v => Math.max(4, Math.round(Math.min(1, v) * 100));
+  return `<div><div class="titre">${titre}</div>
+    <div class="graphe">${barres.map(b => `<div class="col-b" title="${b.titre}">
+      <i class="${b.plein ? '' : 'hach'}" style="height:${hauteur(b.valeur)}%"></i>
+      </div>`).join('')}</div>
+    <div class="graphe-lab">${barres.map(b =>
+      `<span>${b.lab}</span>`).join('')}</div></div>`;
+}
+
+// Demi-cercle de graduations, `part` entre 0 et 1.
+function cadran(part, valeur, lab) {
+  const n = 40;
+  const actifs = Math.round(Math.min(1, Math.max(0, part || 0)) * n);
+  let traits = '';
+  for (let i = 0; i < n; i++) {
+    const a = Math.PI - i * Math.PI / (n - 1);
+    const c = Math.cos(a), s = Math.sin(a);
+    traits += `<line x1="${(100 + 74 * c).toFixed(1)}" y1="${(100 - 74 * s).toFixed(1)}"
+      x2="${(100 + 94 * c).toFixed(1)}" y2="${(100 - 94 * s).toFixed(1)}"
+      style="stroke:var(${i < actifs ? '--accent' : '--line'})"
+      stroke-width="2.4" stroke-linecap="round"/>`;
+  }
+  return `<div class="cadran"><div class="arc">
+    <svg viewBox="0 0 200 104">${traits}</svg><div class="val">${valeur}</div>
+    </div><div class="lab">${lab}</div></div>`;
+}
+
+function chiffre(valeur, lab, cible) {
+  return `<div class="stat"><div class="val">${valeur}</div>
+    <div class="lab"><span>${lab}</span>${cible
+      ? `<a href="${cible}" title="voir le détail">→</a>` : ''}</div></div>`;
+}
+
+// `plans` : lignes de /api/latest ou d'un balayage, qui portent les memes
+// champs et arrivent deja triees par profitabilite decroissante.
+// `avancement` n'est renseigne que pendant un balayage : le cadran montre
+// alors la progression plutot que le meilleur contrat.
+function statsCalcul(plans, avancement) {
+  const top = plans.slice(0, 10);
+  const max = Math.max(1.5, ...top.map(p => p.profitability || 0));
+  const barres = top.map(p => ({
+    valeur: ((p.profitability || 0) - 1) / (max - 1),
+    plein: !!p.all_profitable,
+    lab: nomCourt(p.collection).slice(0, 4),
+    titre: nomCourt(p.collection) + ' : ' + profTexte(p.profitability) +
+      (p.all_profitable ? ', toutes les sorties rentables'
+        : ', le tirage peut faire perdre'),
+  }));
+  const meilleur = plans[0];
+  const enCours = avancement !== null && avancement !== undefined;
+  const cad = enCours
+    ? cadran(avancement, Math.round(avancement * 100) + '%', 'balayage en cours')
+    : meilleur
+      ? cadran(meilleur.win_probability,
+          Math.round((meilleur.win_probability || 0) * 100) + '%',
+          'chances de gagner, meilleur contrat')
+      : cadran(0, '—', 'aucun contrat rentable');
+  const gain = plans.length ? Math.max(...plans.map(p => p.profit || 0)) : null;
+  return graphe('Profitabilité au-dessus du point mort', barres) + cad +
+    chiffre(plans.length, 'contrats<br>rentables', '#resultats') +
+    chiffre(gain === null ? '—' : '+' + gain.toFixed(2),
+      'meilleur gain<br>par contrat', null);
+}
+
+// Pas d'histogramme ici : celui des entrees achetees repetait les "x/10" des
+// vignettes. Ce que la page ne montrait nulle part d'un coup d'oeil, c'est
+// QUAND revenir -- le verrou de 7 jours fixe le jour ou chaque contrat complet
+// devient executable, et ces dates etaient eparpillees dans les vignettes.
+function calendrier(l) {
+  const debut = new Date();
+  debut.setHours(0, 0, 0, 0);
+  const jour = 24 * 3600 * 1000;
+  const jours = Array.from({length: 8}, () => []);
+  l.filter(c => colonneDe(c) === 'verrou' && c.craftable_at).forEach(c => {
+    const i = Math.floor((c.craftable_at * 1000 - debut.getTime()) / jour);
+    jours[Math.min(7, Math.max(0, i))].push(c);
+  });
+  const total = jours.reduce((n, j) => n + j.length, 0);
+  const cases = jours.map((j, i) => {
+    const d = new Date(debut.getTime() + i * jour);
+    const nom = i === 0 ? 'auj.'
+      : d.toLocaleDateString('fr-FR', {weekday: 'short'});
+    return `<div class="jour${i === 0 ? ' auj' : ''}">
+      <div class="jour-nom">${nom}</div><div class="jour-num">${d.getDate()}</div>
+      ${j.map(c => `<span class="deblo" data-ouvrir="${c.id}"
+        title="${nomCourt(c.collection)} : exécutable le ${dt(c.craftable_at)}"
+        >${nomCourt(c.collection)}</span>`).join('')}</div>`;
+  }).join('');
+  return `<div><div class="titre">Exécutables dans les 7 prochains jours</div>
+    <div class="calendrier">${cases}</div>
+    ${total ? '' : '<div class="vide" style="margin-top:8px">aucun contrat en '
+      + 'attente de son verrou</div>'}</div>`;
+}
+
+function statsContrats(l) {
+  const actifs = l.filter(c => colonneDe(c) !== 'fini');
+  const depense = actifs.reduce((s, c) => s + c.spent, 0);
+  const prevu = actifs.reduce((s, c) => s + c.planned_cost, 0);
+  const gain = actifs.reduce((s, c) => s + (c.planned_profit || 0), 0);
+  const prets = actifs.filter(c => c.craftable).length;
+  return calendrier(l) +
+    chiffre(prets, 'exécutables<br>maintenant', '#contrats') +
+    chiffre((gain >= 0 ? '+' : '') + gain.toFixed(2),
+      'gain prévu des<br>contrats en cours', null) +
+    chiffre(depense.toFixed(2), 'dépensés sur ' + prevu.toFixed(2) +
+      '<br>prévus', null);
 }
 
 function banniere(texte, erreur) {
@@ -1295,81 +1445,69 @@ async function charger() {
 // forme deux fois.
 
 function carte(p, planId, archive) {
-  const bloc = [];
+  const alertes = [];
 
-  if (archive) bloc.push(`<div class="warn"><b>Plan archivé.</b> Ces valeurs
-    sont figées au moment du calcul : les annonces ont pu partir et les prix
-    bouger. Relancez une recherche avant d’acheter.</div>`);
+  if (archive) alertes.push(`<div class="warn"><b>Plan archivé.</b> Valeurs
+    figées au calcul : les annonces ont pu partir. Relancez avant d’acheter.</div>`);
 
-  if (p.replis) {
-    bloc.push(`<div class="warn"><b>Valorisation prudente.</b>
-      ${p.replis} sortie(s) n’avaient pas de prix Steam et ont été valorisées
-      sur CSFloat, qui rend <b>17 à 37 % de moins</b>. Le gain réel sera donc
-      supérieur à celui affiché — jamais inférieur de ce fait.</div>`);
+  if (p.fragile) {
+    alertes.push(`<div class="warn"><b>Contrat fragile.</b> Il ne tient qu’en
+      arrivant premier : dès que quelques annonces sont prises il passe sous le
+      point mort. Les annonces retenues sont les moins chères, donc les
+      premières achetées par quiconque fait le même calcul.</div>`);
   }
+  if (!p.all_profitable && p.worst_profit !== null &&
+      p.worst_profit !== undefined) {
+    alertes.push(`<div class="warn"><b>Le tirage peut vous faire perdre :</b>
+      de <span class="neg">${p.worst_profit.toFixed(2)}</span> à
+      <span class="pos">+${(p.best_profit || 0).toFixed(2)}</span> selon la
+      sortie.</div>`);
+  }
+
+  // Les bonnes nouvelles ne prennent plus un bandeau : un bandeau se lit comme
+  // une alerte, et trois bandeaux d'affilee ne se lisent plus du tout.
+  const marques = [];
   if (p.all_profitable) {
-    bloc.push(`<div class="warn ok"><b>Toutes les sorties sont rentables.</b>
-      Quel que soit le skin obtenu vous gagnez, entre
-      <b>+${(p.worst_profit || 0).toFixed(2)}</b> et
-      <b>+${(p.best_profit || 0).toFixed(2)}</b>. Seule une chute des prix peut
-      vous faire perdre, pas le tirage.</div>`);
-  } else if (p.worst_profit !== null && p.worst_profit !== undefined) {
-    bloc.push(`<div class="warn"><b>Le tirage peut vous faire perdre.</b>
-      Selon la sortie obtenue, le résultat va de
-      <span class="neg">${p.worst_profit.toFixed(2)}</span> à
-      <span class="pos">+${(p.best_profit || 0).toFixed(2)}</span>.</div>`);
+    marques.push(`<span class="tag ok" title="Quel que soit le skin obtenu vous
+      gagnez, entre +${(p.worst_profit || 0).toFixed(2)} et
+      +${(p.best_profit || 0).toFixed(2)}. Seule une chute des prix peut vous
+      faire perdre, pas le tirage.">toutes les sorties rentables</span>`);
   }
-
-  const lignes = p.inputs.map(i => `<tr>
-    <td>${i.name}</td>
-    <td class="num">${i.float.toFixed(4)}</td>
-    <td class="num">${i.price.toFixed(2)}</td>
-    <td>${i.url ? `<a class="buy" href="${i.url}" target="_blank">Acheter</a>`
-      : '<span class="muted">annonce non identifiée</span>'}</td></tr>`).join('');
+  if (p.replis) {
+    marques.push(`<span class="tag" title="${p.replis} sortie(s) sans prix
+      Steam, valorisées sur CSFloat qui rend 17 à 37 % de moins. Le gain réel
+      sera supérieur à l’affiché, jamais inférieur de ce fait.">estimation
+      prudente</span>`);
+  }
 
   return `<div class="card">
     <div class="tete">
       <div>
         <h2>${p.collection} <span class="tag">${p.rarity}</span></h2>
-        <div class="muted">10 entrées ${p.rarity} → 1 sortie ${p.rarity_target}</div>
+        <div class="muted">10 entrées ${p.rarity} → 1 sortie
+          ${p.rarity_target}</div>
+        <div class="marques">${marques.join(' ')}</div>
       </div>
       <div style="text-align:right">
         <div class="gros prof">${profTexte(p.profitability)}</div>
         ${jauge(p.profitability)}
-        <div class="muted">profitabilité — 100 % = point mort</div>
+        <div class="muted">100 % = point mort</div>
       </div>
     </div>
     <div class="chiffres">
-      <span>coût sur ${p.buy_market || 'CSFloat'} <b>${p.cost.toFixed(2)}</b></span>
-      <span>revente nette attendue <b>${p.net.toFixed(2)}</b></span>
+      <span>coût <b>${p.cost.toFixed(2)}</b></span>
+      <span>revente nette <b>${p.net.toFixed(2)}</b></span>
       <span>gain <b class="pos">+${p.profit.toFixed(2)}</b></span>
-      <span>chances de gagner <b>${((p.win_probability || 0) * 100).toFixed(0)}%</b></span>
+      <span>chances de gagner
+        <b>${((p.win_probability || 0) * 100).toFixed(0)}%</b></span>
     </div>
-    ${comparatif(p)}
-    ${deuxVoies(p)}
-    ${bloc.join('')}
-    <div class="etape">Méthode d’achat — sur ${p.buy_market || 'CSFloat'}</div>
-    <p class="muted"><b>Les prix ci-dessous sont ceux de
-    ${p.buy_market || 'CSFloat'}, pas de Steam</b>, où le même objet coûte
-    généralement plus cher. La revente est estimée sur
-    ${p.sell_market || 'Steam'}. Ces dix annonces sont précises : le float de
-    chacune décide de l’usure en sortie, donc n’en remplacez aucune par un
-    exemplaire moins cher.</p>
-    <p class="muted"><b>Une annonce est unique et publique.</b> Celles-ci
-    peuvent avoir été achetées depuis le calcul — mesuré sur un contrat de
-    15 h d’âge, les cinq entrées annoncées à 0,06 valaient 0,08 à 0,19 le
-    lendemain. Recotez avant d’acheter.</p>
-    <div class="scroll"><table>
-      <thead><tr><th>Objet</th><th class="num">Float</th>
-        <th class="num">Prix</th><th></th></tr></thead>
-      <tbody>${lignes}</tbody>
-    </table></div>
-    <p class="muted">Moyenne de float ${p.avg_float.toFixed(4)} sur
-    ${p.listings_examined} annonces examinées. Achetez les dix d’un coup : le
-    verrou de 7 jours part à la réception de chaque objet, et le contrat ne
-    peut se faire qu’une fois le dernier libéré.</p>
+    ${voies(p)}
+    ${alertes.join('')}
+    ${detailAnnonces(p)}
+    ${detailOrdres(p)}
     <details>
-      <summary>Ce que le contrat peut sortir</summary>
+      <summary>Ce que le contrat peut sortir
+        (${p.outcomes.length} issue${p.outcomes.length > 1 ? 's' : ''})</summary>
       <div class="scroll"><table>
         <thead><tr><th>Skin</th><th class="num">Probabilité</th>
           <th class="num">Float</th><th class="num">Revente nette</th></tr></thead>
@@ -1383,6 +1521,133 @@ function carte(p, planId, archive) {
       <button class="sm" data-follow="${planId}">Suivre ce contrat</button>
     </div>
   </div>`;
+}
+
+// Les DEUX voies d'approvisionnement dans UN tableau. Il y en avait deux qui se
+// recouvraient : `comparatif` (CSFloat / sans arriver premier / Steam) et
+// `deuxVoies` (CSFloat / ordre Steam). Quatre lignes de prix a lire pour une
+// seule question -- ou acheter, et ce que ca coute.
+//
+// Ce qui tranche n'est pas le prix mais le FLOAT : un ordre d'achat porte sur
+// une usure, pas sur une qualite. Si les sorties changent de palier quand le
+// float est subi, la voie Steam est simplement fermee.
+function voies(p) {
+  const achat = p.buy_market || 'CSFloat';
+  const revente = p.sell_market || 'Steam';
+  const lignes = [];
+
+  lignes.push(`<tr><td><b>${achat}</b>, ces 10 annonces</td>
+    <td class="num">${p.cost.toFixed(2)}</td>
+    <td class="num prof">${profTexte(p.profitability)}</td>
+    <td class="muted libre">float choisi, disponible tout de suite ·
+      <b>verrou 7 jours</b> · non répétable</td></tr>`);
+
+  if (p.float_subi_ok === false) {
+    lignes.push(`<tr><td><b>Ordre d’achat ${revente}</b></td>
+      <td class="num neg">impossible</td><td class="num">—</td>
+      <td class="muted libre">le float est subi et les sorties changeraient de
+        palier : ce contrat exige de choisir les floats</td></tr>`);
+  } else if (p.order_budget === null || p.order_budget === undefined) {
+    lignes.push(`<tr><td><b>Ordre d’achat ${revente}</b></td>
+      <td class="num">—</td><td class="num">—</td>
+      <td class="muted libre">prix ${revente} indisponible</td></tr>`);
+  } else {
+    lignes.push(`<tr><td><b>Ordre d’achat ${revente}</b>
+      ${p.order_discount === null || p.order_discount === undefined ? ''
+        : `à −${Math.round(p.order_discount * 100)} %`}</td>
+      <td class="num">${p.order_budget.toFixed(2)}</td>
+      <td class="num prof">visé</td>
+      <td class="muted libre">float <b>subi</b> · <b>répétable</b>, l’ordre se pose
+        une fois · sans verrou</td></tr>`);
+  }
+
+  if (p.cost_alt === null || p.cost_alt === undefined) {
+    lignes.push(`<tr><td>${revente} au prix affiché</td>
+      <td class="num">—</td><td class="num">—</td>
+      <td class="muted libre">un prix manquait</td></tr>`);
+  } else {
+    const ecart = (p.cost_alt - p.cost) / p.cost;
+    const profAlt = p.profitability_alt || 0;
+    const tient = profAlt >= SEUIL_PROFITABLE;
+    lignes.push(`<tr><td>${revente} au prix affiché</td>
+      <td class="num">${p.cost_alt.toFixed(2)}
+        <span class="muted">${ecart >= 0 ? '+' : ''}${Math.round(ecart * 100)} %</span></td>
+      <td class="num ${tient ? 'prof' : 'neg'}">${profTexte(profAlt)}</td>
+      <td class="muted libre">${tient ? 'sans verrou, mais float subi'
+        : 'sous le point mort — l’écart entre les deux marchés EST la marge'}</td>
+      </tr>`);
+  }
+
+  return `<div class="etape">Comment acheter les 10 entrées</div>
+    <div class="scroll"><table>
+      <thead><tr><th>voie</th><th class="num">coût des 10</th>
+        <th class="num">profitabilité</th><th>ce que ça implique</th></tr></thead>
+      <tbody>${lignes.join('')}</tbody>
+    </table></div>`;
+}
+
+// Les annonces precises. Repliees : ce sont dix lignes qui n'ont d'interet
+// qu'au moment d'acheter, et elles repoussaient tout le reste hors de l'ecran.
+function detailAnnonces(p) {
+  const achat = p.buy_market || 'CSFloat';
+  return `<details>
+    <summary>Acheter maintenant sur ${achat} — les 10 annonces
+      (${p.cost.toFixed(2)})</summary>
+    <p class="muted">Prix ${achat}, pas ${p.sell_market || 'Steam'}. Ces
+    annonces sont <b>uniques et périssables</b> : n’en remplacez aucune par un
+    exemplaire moins cher, le float de chacune décide de l’usure en sortie.
+    Achetez les dix d’un coup — le verrou de 7 jours part à la réception de
+    chaque objet.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Objet</th><th class="num">Float</th>
+        <th class="num">Prix</th><th></th></tr></thead>
+      <tbody>${p.inputs.map(i => `<tr>
+        <td>${i.name}</td>
+        <td class="num">${i.float.toFixed(4)}</td>
+        <td class="num">${i.price.toFixed(2)}</td>
+        <td>${i.url ? `<a class="buy" href="${i.url}" target="_blank">Acheter</a>`
+          : '<span class="muted">annonce non identifiée</span>'}</td></tr>`).join('')}
+      </tbody>
+    </table></div>
+    <p class="muted">Float moyen ${p.avg_float.toFixed(4)} sur
+    ${p.listings_examined} annonces examinées.</p>
+  </details>`;
+}
+
+// Les ordres a placer, objet par objet. C'etait un ONGLET separe qui refaisait
+// tout le calcul : un panier d'annonces ne se repete pas, un ordre si, donc les
+// deux voies doivent se lire au meme endroit -- sur le contrat.
+function detailOrdres(p) {
+  if (!p.order_lines || !p.order_lines.length) return '';
+  // Si le float subi ferait changer les sorties de palier, cette voie est
+  // fermee -- et le tableau ci-dessus le dit. Proposer quand meme les prix
+  // d'ordre contredirait la ligne juste au-dessus.
+  if (p.float_subi_ok === false) return '';
+  const revente = p.sell_market || 'Steam';
+  const bloques = p.order_lines.filter(l => l.below_floor).length;
+  return `<details>
+    <summary>Placer des ordres sur ${revente} — les 10 prix
+      (${(p.order_budget || 0).toFixed(2)})</summary>
+    <p class="muted">Le <b>float sera tiré au hasard</b> dans le palier : un
+    ordre porte sur une usure, pas sur une qualité. C’est le prix qu’on choisit.
+    En échange, l’ordre se pose une fois, se remplit seul, et les objets sont
+    échangeables tout de suite.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Objet</th><th class="num">Qté</th>
+        <th class="num">Prix ${revente}</th><th class="num">Ordre à placer</th>
+        </tr></thead>
+      <tbody>${p.order_lines.map(l => `<tr>
+        <td>${l.name}${l.below_floor
+          ? ' <span class="tag">sous le plancher</span>' : ''}</td>
+        <td class="num">${l.quantity}</td>
+        <td class="num">${l.market_price.toFixed(2)}</td>
+        <td class="num prof">${l.order_price.toFixed(2)}</td></tr>`).join('')}
+      </tbody>
+    </table></div>
+    ${bloques ? `<p class="muted"><b>${bloques} ligne(s) sous le plancher de
+      0,03 de ${revente}</b> : aucun rabais ne peut les sauver, l’ordre ne
+      serait jamais servi.</p>` : ''}
+  </details>`;
 }
 
 // --- Ce que la nuit a trouve ------------------------------------------------
@@ -1402,6 +1667,8 @@ async function dernierBalayage() {
   const d = await fetch('/api/latest?rarity=' + r).then(x => x.json());
   if (d.error) return;
   const plans = d.plans || [];
+  $('#stats-calcul').innerHTML = statsCalcul(plans, null);
+  $('#nb-calcul').textContent = plans.length || '';
 
   if (!plans.length) {
     $('#avancement').innerHTML = `<div class="card">
@@ -1427,172 +1694,20 @@ async function dernierBalayage() {
     .map((p, i) => carte(plansComplets[i], p.plan_id, age > 24 * 3600)).join('');
 }
 
-// --- Les ordres d'achat -----------------------------------------------------
-// Un panier d'annonces ne se repete pas : chaque annonce est unique, et le
-// lendemain il faut tout rechercher. Un ordre se pose une fois et se remplit
-// tout seul -- c'est la seule forme exploitable quand on veut REFAIRE le
-// meme contrat.
-
-async function ordres() {
-  const r = $('#ord-rarity').value;
-  $('#ord-sortie').innerHTML = '<div class="card"><span class="spin"></span>lecture…</div>';
-  const d = await fetch('/api/orders?rarity=' + r).then(x => x.json());
-  if (d.error) {
-    $('#ord-sortie').innerHTML = '<div class="card"><div class="warn">' +
-      d.error + '</div></div>';
-    return;
-  }
-  const plans = d.plans || [];
-  const vieux = d.age_hours !== null && d.age_hours > 24;
-
-  if (!plans.length) {
-    $('#ord-sortie').innerHTML = `<div class="card">
-      <b>Aucun ordre ne peut rendre un contrat rentable dans cette rareté.</b>
-      <p class="muted">Soit le rabais nécessaire dépasse ce qu’un ordre peut
-      espérer obtenir, soit il tomberait sous le plancher de 0,03 € de Steam.
-      Les prix viennent du dernier balayage.</p></div>`;
-    return;
-  }
-
-  $('#ord-sortie').innerHTML = `
-    <div class="card">
-      <b>${plans.length} contrat(s) atteignables par ordre d’achat</b>
-      <p class="muted">Ordres à placer sur <b>${d.market}</b> ·
-      montants en ${d.currency} · rendement visé
-      +${Math.round(d.target_roi * 100)} %
-      ${d.age_hours === null ? '' : `· prix vieux de ${d.age_hours} h`}
-      ${vieux ? '<br><b>Plus de 24 h : recotez avant de placer.</b>' : ''}</p>
-    </div>` + plans.map(p => `
-    <div class="card">
-      <div class="tete">
-        <div>
-          <h2>${p.collection} <span class="tag">${p.rarity}</span></h2>
-          <div class="muted">10 entrées → 1 sortie ${p.rarity_target}</div>
-        </div>
-        <div style="text-align:right">
-          <div class="gros prof">−${Math.round(p.discount * 100)} %</div>
-          <div class="muted">rabais à obtenir</div>
-        </div>
-      </div>
-      <div class="chiffres">
-        <span>au prix demandé <b>${p.market_cost.toFixed(2)}</b></span>
-        <span>budget maximal <b>${p.budget.toFixed(2)}</b></span>
-        <span>revente nette attendue <b>${p.ev_net.toFixed(2)}</b></span>
-        <span>chances de gagner <b>${Math.round(p.win_probability * 100)} %</b></span>
-      </div>
-      <div class="etape">Ordres à placer sur ${d.market}</div>
-      <div class="scroll"><table>
-        <thead><tr><th>Objet</th><th class="num">Qté</th>
-          <th class="num">Prix marché</th><th class="num">Prix d’ordre</th>
-          <th class="num">Rabais</th></tr></thead>
-        <tbody>${p.lines.map(l => `<tr>
-          <td>${l.name}${l.below_floor
-            ? ' <span class="tag">sous le plancher Steam</span>' : ''}</td>
-          <td class="num">${l.quantity}</td>
-          <td class="num">${l.market_price.toFixed(2)}</td>
-          <td class="num prof">${l.order_price.toFixed(2)}</td>
-          <td class="num">${Math.round(l.discount * 100)} %</td></tr>`).join('')}
-        </tbody>
-      </table></div>
-      <div class="warn"><b>Le float sera tiré au hasard dans le palier.</b>
-      Un ordre d’achat porte sur une usure, pas sur un float : c’est le prix
-      qui est choisi, pas la qualité. Les chances de gagner ci-dessus en
-      tiennent compte.</div>
-    </div>`).join('');
-}
-
-// Le MEME panier, achete sur l'autre marche. Un utilisateur qui verifie une
-// entree le fait sur Steam, y trouve plus cher, et croit a une erreur : mesure
-// sur Dead Hand, 1,26 sur CSFloat contre 1,74 sur Steam. Les deux chiffres
-// sont justes. Les montrer ensemble dit aussi si le contrat ne tient QUE grace
-// a l'ecart entre les marches -- 108 % d'un cote, 78 % de l'autre.
-function comparatif(p) {
-  if (p.cost_alt === null || p.cost_alt === undefined) {
-    return `<p class="muted">Coût sur ${p.sell_market || 'Steam'} :
-      <b>non disponible</b> — un prix manquait. Vérifier une entrée sur
-      ${p.sell_market || 'Steam'} y donnera un chiffre plus élevé sans que
-      celui-ci soit faux.</p>`;
-  }
-  const ecart = (p.cost_alt - p.cost) / p.cost;
-  const profAlt = p.profitability_alt || 0;
-  const tient = profAlt >= SEUIL_PROFITABLE;
-  return `<div class="scroll"><table>
-    <thead><tr><th>si vous achetez sur…</th><th class="num">coût des 10</th>
-      <th class="num">profitabilité</th></tr></thead>
-    <tbody>
-      <tr><td><b>${p.buy_market || 'CSFloat'}</b> (ce que la recette demande)</td>
-        <td class="num">${p.cost.toFixed(2)}</td>
-        <td class="num prof">${profTexte(p.profitability)}</td></tr>
-      ${p.cost_deep === null || p.cost_deep === undefined ? '' : `
-      <tr><td>${p.buy_market || 'CSFloat'}, <b>sans arriver premier</b>
-        <span class="muted">(3 annonces prises par objet)</span></td>
-        <td class="num">${p.cost_deep.toFixed(2)}</td>
-        <td class="num ${(p.profitability_deep || 0) >= SEUIL_PROFITABLE
-          ? 'prof' : 'neg'}">${profTexte(p.profitability_deep)}</td></tr>`}
-      <tr><td>${p.sell_market || 'Steam'}</td>
-        <td class="num">${p.cost_alt.toFixed(2)}
-          <span class="muted">(${ecart >= 0 ? '+' : ''}${Math.round(ecart * 100)} %)</span></td>
-        <td class="num ${tient ? 'prof' : 'neg'}">${profTexte(profAlt)}</td></tr>
-    </tbody></table></div>
-  ${p.fragile ? `<div class="warn">
-    <b>Contrat FRAGILE.</b> Il ne tient qu'en arrivant premier sur le carnet :
-    dès que quelques annonces sont prises, il passe sous le point mort — ou le
-    panier ne peut plus être composé du tout. Les annonces retenues sont par
-    construction les moins chères, donc les premières achetées par quiconque
-    fait le même calcul.</div>` : ''}
-  ${!tient && p.profitability >= SEUIL_PROFITABLE ? `<div class="warn">
-    <b>Ce contrat ne tient que sur ${p.buy_market || 'CSFloat'}.</b> Acheté sur
-    ${p.sell_market || 'Steam'} il passe sous le point mort. L’écart entre les
-    deux marchés EST la marge — et tout achat ${p.buy_market || 'CSFloat'}
-    subit le verrou de 7 jours.</div>` : ''}`;
-}
-
-// Les DEUX voies d'approvisionnement, avec leur compromis.
-//
-// CSFloat : float choisi, prix bas -- mais verrou de 7 jours, et une annonce
-// est unique donc rien n'est repetable.
-// Ordre Steam : float SUBI, prix a obtenir par rabais -- mais utilisable tout
-// de suite, et l'ordre se pose une fois puis se remplit seul.
-//
-// Ce qui tranche n'est pas le prix, c'est le float : un ordre porte sur une
-// usure, pas sur une qualite. Si les sorties changent de palier quand le float
-// est subi, la voie Steam est simplement fermee.
-function deuxVoies(p) {
-  const ok = p.float_subi_ok;
-  const rabais = p.order_discount;
-  const budget = p.order_budget;
-
-  const ligneSteam = (ok === false)
-    ? `<tr><td><b>Ordre d’achat Steam</b></td>
-        <td class="num neg">impossible</td>
-        <td>le float est subi, et les sorties changeraient de palier —
-          ce contrat exige de choisir les floats</td></tr>`
-    : (rabais === null || rabais === undefined)
-      ? `<tr><td><b>Ordre d’achat Steam</b></td><td class="num">—</td>
-          <td>prix Steam indisponible</td></tr>`
-      : `<tr><td><b>Ordre d’achat Steam</b></td>
-          <td class="num prof">${budget.toFixed(2)}</td>
-          <td>viser <b>−${Math.round(rabais * 100)} %</b> sous le prix affiché.
-            Float subi mais acceptable. <b>Répétable</b>, pas de verrou.</td></tr>`;
-
-  return `<div class="etape">Les deux voies</div>
-    <div class="scroll"><table>
-      <thead><tr><th>voie</th><th class="num">à payer pour les 10</th>
-        <th>ce que ça implique</th></tr></thead>
-      <tbody>
-        <tr><td><b>Achat direct CSFloat</b></td>
-          <td class="num prof">${p.cost.toFixed(2)}</td>
-          <td>float choisi, disponible tout de suite.
-            <b>Verrou de 7 jours</b>, et non répétable — ces annonces sont
-            uniques.</td></tr>
-        ${ligneSteam}
-      </tbody>
-    </table></div>`;
-}
-
 // --- La recherche -----------------------------------------------------------
 
 let sondageBatch = null, dernierBatch = null;
+
+// La vue d'un plan s'ouvre depuis la liste des contrats, dans un AUTRE onglet :
+// sans retour explicite, revenir a la liste demandait de retrouver l'onglet et
+// la ligne a la main. On memorise donc ou l'on etait.
+let positionListe = 0;
+let chargementContrats = Promise.resolve();
+
+function boutonRetour() {
+  return `<button class="ghost retour" data-retour="1">← Retour à mes
+    contrats</button>`;
+}
 // Un plan enregistre ne change plus : le relire a chaque sondage serait du
 // trafic pur.
 const plansCharges = {};
@@ -1649,6 +1764,8 @@ async function suivreBatch(id) {
 async function dessinerBatch(b) {
   const pct = Math.round(b.progress * 100);
   const fini = b.state === 'finished' || b.state === 'stopped';
+  $('#stats-calcul').innerHTML = statsCalcul(b.results, fini ? null : b.progress);
+  $('#nb-calcul').textContent = b.results.length || '';
 
   $('#avancement').innerHTML = `<div class="card">
     <div class="row" style="justify-content:space-between;margin:0">
@@ -1695,9 +1812,11 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
   document.querySelectorAll('.pane').forEach(p =>
     p.classList.toggle('on', p.id === 'pane-' + t.dataset.pane));
-  if (t.dataset.pane === 'ordres') ordres();
-  if (t.dataset.pane === 'histo') histo();
-  if (t.dataset.pane === 'contrats') contrats();
+  // Les plans calcules et les contrats suivis sont deux vues du meme objet
+  // et partagent desormais un onglet : un seul clic charge les deux.
+  if (t.dataset.pane === 'contrats') {
+    chargementContrats = Promise.all([contrats(), histo()]);
+  }
   if (t.dataset.pane === 'inventaire') invApercu(false);
 });
 
@@ -1745,68 +1864,166 @@ async function histo() {
     : '<tr><td colspan="7" class="muted">aucun plan calcule pour le moment</td></tr>';
 }
 
+// --- Contrats suivis, en colonnes -------------------------------------------
+// Un contrat avance de gauche a droite : on achete, on attend la fin du verrou
+// de 7 jours, on execute. La colonne dit ou il en est sans lire la carte.
+
+const COLONNES = [
+  ['afaire', 'À acheter'], ['achat', 'Achats en cours'],
+  ['verrou', 'Verrou 7 jours'], ['pret', 'Exécutables'], ['fini', 'Terminés'],
+];
+
+function colonneDe(c) {
+  if (c.status === 'realise' || c.status === 'abandonne') return 'fini';
+  if (c.craftable) return 'pret';
+  if (c.complete) return 'verrou';
+  return c.purchased > 0 ? 'achat' : 'afaire';
+}
+
+const ICONE_DATE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/>' +
+  '<path d="M3 10h18M8 3v4M16 3v4"/></svg>';
+const ICONE_PANIER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2"><path d="M3 4h2l2.5 11h11L21 8H6.5"/>' +
+  '<circle cx="9" cy="19" r="1.5"/><circle cx="18" cy="19" r="1.5"/></svg>';
+
 async function contrats() {
-  const tous = $('#tous').checked ? '?all=1' : '';
-  const d = await fetch('/api/contracts' + tous).then(x => x.json());
+  const tous = $('#tous').checked;
+  const d = await fetch('/api/contracts' + (tous ? '?all=1' : ''))
+    .then(x => x.json());
   const l = d.contracts || [];
+  contratsCharges = l;
+  $('#stats-contrats').innerHTML = statsContrats(l);
+  $('#nb-contrats').textContent = l.filter(c => colonneDe(c) !== 'fini').length || '';
   if (!l.length) {
     $('#contrats').innerHTML = '<div class="card muted">Aucun contrat suivi. ' +
-      'Ouvrez l&rsquo;historique et cliquez Suivre.</div>';
+      'Cliquez Suivre sur un plan calculé, plus bas.</div>';
     return;
   }
-  $('#contrats').innerHTML = l.map(c => {
-    const pct = Math.round(c.purchased / 10 * 100);
-    let etat;
-    if (c.craftable) {
-      etat = '<span class="tag" style="background:#0f7a3d;color:#fff">executable maintenant</span>';
-    } else if (c.craftable_at) {
-      etat = '<span class="tag">executable le ' + dt(c.craftable_at) + '</span>';
-    } else {
-      etat = '<span class="tag">' + c.purchased + '/10 achetes</span>';
-    }
-
-    let derive = '';
-    if (c.float_drift !== null) {
-      const gros = Math.abs(c.float_drift) > 0.003;
-      derive = '<div class="' + (gros ? 'warn' : 'muted') + '">Float moyen reel : <b>' +
-        c.actual_avg_float.toFixed(4) + '</b> (prevu ' + c.planned_avg_float.toFixed(4) +
-        ', ecart ' + (c.float_drift >= 0 ? '+' : '') + c.float_drift.toFixed(4) + ')' +
-        (gros ? ' &mdash; verifiez que la sortie n&rsquo;a pas change de palier.' : '') +
-        '</div>';
-    }
-
-    const lignes = c.items.map(i => {
-      const verrou = i.purchased
-        ? (i.locked ? 'jusqu&rsquo;au ' + dt(i.tradable_at) : 'libre')
-        : '<span class="muted">non achete</span>';
-      const actions = i.purchased
-        ? '<button class="ghost sm" data-item="' + i.id + '" data-act="annuler">Annuler</button>'
-        : (i.url ? '<a class="buy" href="' + i.url + '" target="_blank">Acheter</a> ' : '') +
-          '<button class="sm" data-item="' + i.id + '" data-act="acheter">Achete</button>';
-      return '<tr class="' + (i.purchased ? 'done' : '') + '"><td>' + i.name +
-        (i.from_plan ? '' : ' <span class="tag">substitut</span>') +
-        '</td><td class="num">' + i.float.toFixed(4) +
-        '</td><td class="num">' + i.price.toFixed(2) +
-        '</td><td>' + verrou + '</td><td>' + actions + '</td></tr>';
+  $('#contrats').innerHTML = COLONNES
+    .filter(([cle]) => cle !== 'fini' || tous)
+    .map(([cle, titre]) => {
+      const ici = l.filter(c => colonneDe(c) === cle);
+      return `<div class="colonne">
+        <div class="colonne-tete"><h2>${titre}</h2>
+          <span class="nb">${ici.length}</span></div>
+        ${ici.length ? ici.map(carteContrat).join('')
+          : '<div class="colonne-vide">aucun contrat</div>'}</div>`;
     }).join('');
+}
 
-    return '<div class="card"><div class="row" style="justify-content:space-between">' +
-      '<b>' + c.collection + '</b> ' +
-      (c.rarity ? '<span class="tag">' + c.rarity + '</span> ' : '') +
-      etat + '</div>' +
-      '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
-      '<p class="muted">Depense ' + c.spent.toFixed(2) + ' / prevu ' +
-      c.planned_cost.toFixed(2) + ' &middot; cree le ' + dt(c.created_at) +
-      ' &middot; statut : ' + c.status + '</p>' + derive +
-      '<div class="scroll"><table><thead><tr><th>Objet</th><th class="num">Float</th>' +
-      '<th class="num">Prix</th><th>Verrou</th><th></th></tr></thead><tbody>' +
-      lignes + '</tbody></table></div>' +
-      '<div class="row" style="margin-top:10px">' +
-      '<button class="ghost sm" data-ct="' + c.id + '" data-status="realise">Marquer realise</button>' +
-      '<button class="ghost sm" data-ct="' + c.id + '" data-status="abandonne">Abandonner</button>' +
-      '<button class="ghost sm" data-ct="' + c.id + '" data-del="1">Supprimer</button>' +
-      '</div></div>';
+// La vignette resume, la modale detaille. La liste des objets et les actions
+// vivaient dans un <details> de la vignette : dix lignes de tableau dans une
+// colonne de 250 px, qui defilaient de cote.
+
+let contratsCharges = [];
+let contratOuvert = null;
+
+function quandContrat(c) {
+  if (colonneDe(c) === 'fini') return c.status === 'realise' ? 'réalisé' : 'abandonné';
+  if (c.craftable) return 'exécutable maintenant';
+  if (c.craftable_at) return 'exécutable le ' + dt(c.craftable_at);
+  return 'créé le ' + dt(c.created_at);
+}
+
+function deriveContrat(c) {
+  if (c.float_drift === null || c.float_drift === undefined) return '';
+  const gros = Math.abs(c.float_drift) > 0.003;
+  return '<div class="' + (gros ? 'warn' : 'muted') + '">Float moyen reel : <b>' +
+    c.actual_avg_float.toFixed(4) + '</b> (prevu ' + c.planned_avg_float.toFixed(4) +
+    ', ecart ' + (c.float_drift >= 0 ? '+' : '') + c.float_drift.toFixed(4) + ')' +
+    (gros ? ' &mdash; verifiez que la sortie n&rsquo;a pas change de palier.' : '') +
+    '</div>';
+}
+
+function carteContrat(c) {
+  const gain = c.planned_profit || 0;
+  return `<div class="mini${colonneDe(c) === 'pret' ? ' fort' : ''}"
+      data-ouvrir="${c.id}" role="button" tabindex="0"
+      title="Ouvrir le contrat">
+    <h3>${c.collection}</h3>
+    <div class="muted">${c.rarity ? c.rarity + ' · ' : ''}dépensé
+      ${c.spent.toFixed(2)} sur ${c.planned_cost.toFixed(2)} prévus · gain prévu
+      ${gain >= 0 ? '+' : ''}${gain.toFixed(2)}</div>
+    ${deriveContrat(c)}
+    <div class="puces">
+      <span class="puce">${ICONE_DATE}${quandContrat(c)}</span>
+      <span class="puce" title="entrées achetées">${ICONE_PANIER}${c.purchased}/10</span>
+    </div></div>`;
+}
+
+function detailContrat(c) {
+  const col = colonneDe(c);
+  const lignes = c.items.map(i => {
+    const verrou = i.purchased
+      ? (i.locked ? 'jusqu&rsquo;au ' + dt(i.tradable_at) : 'libre')
+      : '<span class="muted">non achete</span>';
+    const actions = i.purchased
+      ? '<button class="ghost sm" data-item="' + i.id + '" data-act="annuler">Annuler l’achat</button>'
+      : (i.url ? '<a class="buy" href="' + i.url + '" target="_blank">Acheter</a> ' : '') +
+        '<button class="sm" data-item="' + i.id + '" data-act="acheter">Achete</button>';
+    return '<tr class="' + (i.purchased ? 'done' : '') + '"><td>' + i.name +
+      (i.from_plan ? '' : ' <span class="tag">substitut</span>') +
+      '</td><td class="num">' + i.float.toFixed(4) +
+      '</td><td class="num">' + i.price.toFixed(2) +
+      '</td><td>' + verrou + '</td><td>' + actions + '</td></tr>';
   }).join('');
+
+  const gain = c.planned_profit || 0;
+  const titre = COLONNES.find(([cle]) => cle === col)[1];
+  // Un contrat termine n'a plus a etre marque realise ou abandonne.
+  const statuts = col === 'fini' ? '' : `
+      <button class="ghost" data-ct="${c.id}" data-status="realise">Marquer réalisé</button>
+      <button class="ghost" data-ct="${c.id}" data-status="abandonne">Abandonner</button>`;
+  return `<div class="modale-corps">
+    <div class="tete">
+      <div>
+        <h2>${c.collection} ${c.rarity ? `<span class="tag">${c.rarity}</span>` : ''}</h2>
+        <div class="muted">${titre} · ${quandContrat(c)} · créé le ${dt(c.created_at)}</div>
+      </div>
+    </div>
+    <div class="chiffres">
+      <span>dépensé <b>${c.spent.toFixed(2)}</b></span>
+      <span>coût prévu <b>${c.planned_cost.toFixed(2)}</b></span>
+      <span>gain prévu <b class="${gain >= 0 ? 'pos' : 'neg'}">${gain >= 0 ? '+' : ''}${gain.toFixed(2)}</b></span>
+      <span>entrées achetées <b>${c.purchased}/10</b></span>
+    </div>
+    <div class="bar"><i style="width:${Math.min(100, c.purchased * 10)}%"></i></div>
+    ${deriveContrat(c)}
+    <div class="etape">Les 10 entrées</div>
+    <div class="scroll"><table><thead><tr><th>Objet</th>
+      <th class="num">Float</th><th class="num">Prix</th><th>Verrou</th><th></th>
+      </tr></thead><tbody>${lignes}</tbody></table></div>
+  </div>
+  <div class="modale-pied">
+    <div class="row" style="margin:0">
+      ${statuts}
+      ${c.plan_id ? `<button class="ghost" data-voir="${c.plan_id}">Voir le plan</button>` : ''}
+      <button class="ghost danger" data-ct="${c.id}" data-del="1">Supprimer</button>
+    </div>
+    <button class="ghost neutre" data-fermer="1" autofocus>Annuler</button>
+  </div>`;
+}
+
+function ouvrirContrat(id) {
+  const c = contratsCharges.find(x => x.id === id);
+  if (!c) return;
+  contratOuvert = id;
+  $('#modale').innerHTML = detailContrat(c);
+  if (!$('#modale').open) $('#modale').showModal();
+}
+
+function fermerModale() {
+  contratOuvert = null;
+  if ($('#modale').open) $('#modale').close();
+}
+
+// Apres une action, la modale reste ouverte sur le contrat a jour -- sauf s'il
+// a quitte la liste (supprime, ou termine alors que les termines sont caches).
+function rafraichirModale() {
+  if (!contratOuvert) return;
+  if (contratsCharges.some(x => x.id === contratOuvert)) ouvrirContrat(contratOuvert);
+  else fermerModale();
 }
 
 document.addEventListener('click', async e => {
@@ -1814,10 +2031,26 @@ document.addEventListener('click', async e => {
   if (v) {
     const r = await fetch('/api/plan/' + v.dataset.voir).then(x => x.json());
     if (r.error) { banniere(r.error, true); return; }
+    fermerModale();
+    positionListe = window.scrollY;
     document.querySelector('.tab[data-pane="calcul"]').click();
-    $('#avancement').innerHTML = '';
+    $('#avancement').innerHTML = boutonRetour();
     $('#resultats').innerHTML = carte(r.plan, v.dataset.voir, true);
-    $('#resultats').scrollIntoView({behavior: 'smooth', block: 'start'});
+    // Le bouton est AU-DESSUS de la carte : viser la carte le cacherait.
+    $('#avancement').scrollIntoView({behavior: 'smooth', block: 'start'});
+    return;
+  }
+  if (e.target.closest('[data-retour]')) {
+    // La vue d'un plan avait pris la place des resultats du jour : on les
+    // remet, sans quoi l'onglet Calculer resterait fige sur ce plan.
+    $('#avancement').innerHTML = '';
+    $('#resultats').innerHTML = '';
+    dernierBalayage();
+    document.querySelector('.tab[data-pane="contrats"]').click();
+    // La liste se recharge : restaurer la position avant qu'elle soit
+    // redessinee retomberait sur une page trop courte.
+    await chargementContrats;
+    window.scrollTo(0, positionListe);
     return;
   }
   const f = e.target.closest('[data-follow]');
@@ -1839,7 +2072,8 @@ document.addEventListener('click', async e => {
     }
     await fetch('/api/item', {method: 'POST',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify(corps)});
-    contrats();
+    await contrats();
+    rafraichirModale();
     return;
   }
   const ct = e.target.closest('[data-ct]');
@@ -1851,7 +2085,29 @@ document.addEventListener('click', async e => {
     } else { corps.status = ct.dataset.status; }
     await fetch('/api/contract', {method: 'POST',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify(corps)});
-    contrats();
+    await contrats();
+    rafraichirModale();
+    return;
+  }
+  const ouvrir = e.target.closest('[data-ouvrir]');
+  if (ouvrir) { ouvrirContrat(ouvrir.dataset.ouvrir); return; }
+  // Annuler, ou un clic sur le fond : l'evenement vise alors le <dialog>
+  // lui-meme, pas son contenu.
+  if (e.target.closest('[data-fermer]') || e.target === $('#modale')) {
+    fermerModale();
+  }
+});
+
+// Echap ferme le <dialog> sans passer par fermerModale() : sans cela, la
+// prochaine action rouvrirait un contrat qu'on a quitte.
+$('#modale').addEventListener('close', () => { contratOuvert = null; });
+
+// Une vignette se prend au clavier comme a la souris.
+document.addEventListener('keydown', e => {
+  const ouvrir = e.target.closest && e.target.closest('[data-ouvrir]');
+  if (ouvrir && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    ouvrirContrat(ouvrir.dataset.ouvrir);
   }
 });
 
@@ -2020,14 +2276,15 @@ $('#inv-calculer').addEventListener('click', async () => {
 
 $('#tous').addEventListener('change', contrats);
 $('#rafraichir').addEventListener('click', contrats);
-$('#ord-rarity').addEventListener('change', ordres);
-$('#ord-relire').addEventListener('click', ordres);
 $('#rarity').addEventListener('change', () => {
   charger();
   dernierBalayage();
 });
 charger();
 dernierBalayage();
+// Lecture locale du journal, sans requete CSFloat : elle remplit le compteur
+// du menu avant meme qu'on ouvre l'onglet.
+contrats();
 </script></body></html>
 """
 
