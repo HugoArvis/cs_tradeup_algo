@@ -957,6 +957,18 @@ font-variant-numeric:tabular-nums}
 margin-top:26px;font-size:13px;color:var(--muted)}
 .stat a{color:var(--ink);text-decoration:none;font-size:18px}
 .vide{color:var(--muted);font-size:13px;align-self:center}
+/* --- Calendrier des deblocages (onglet Mes contrats) --- */
+.stats.agenda{grid-template-columns:minmax(340px,2.2fr) repeat(3,minmax(140px,.8fr))}
+.calendrier{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}
+.jour{display:flex;flex-direction:column;align-items:center;gap:4px;min-height:96px;
+padding:6px 4px 8px;background:var(--card);border:1px solid var(--line);
+border-radius:8px;text-align:center}
+.jour.auj{border-color:var(--accent)}
+.jour-nom{font-size:11px;color:var(--muted);text-transform:uppercase}
+.jour-num{font-size:16px;font-weight:650}
+.deblo{display:block;width:100%;padding:1px 3px;border-radius:4px;font-size:11px;
+background:var(--accent);color:var(--card);cursor:pointer;overflow:hidden;
+white-space:nowrap;text-overflow:ellipsis}
 /* --- Colonnes de suivi des contrats --- */
 .kanban{display:grid;gap:18px;align-items:start;margin-bottom:22px;
 grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
@@ -1006,7 +1018,8 @@ border-bottom:1px solid var(--line)}
 .side-pied{display:none}
 .main{padding:0 16px 40px}
 .bandeau{margin:0 -16px 18px;padding:16px}
-.stats{grid-template-columns:1fr 1fr}
+.stats,.stats.agenda{grid-template-columns:1fr 1fr}
+.stats.agenda>div:first-child{grid-column:1/-1}
 }
 /* Pleine largeur. Les TABLEAUX gagnent a s'etaler -- c'est la que la place
    sert. La PROSE non : une ligne de 2000 px ne se lit plus, l'oeil perd le
@@ -1231,7 +1244,7 @@ vertical-align:-2px;margin-right:7px}
       <label><input type="checkbox" id="tous"> afficher aussi les terminés</label>
       <button class="ghost sm" id="rafraichir">Rafraîchir</button>
     </div>
-    <div class="stats" id="stats-contrats"></div>
+    <div class="stats agenda" id="stats-contrats"></div>
   </section>
   <div id="contrats" class="kanban"></div>
   <div class="card">
@@ -1353,22 +1366,46 @@ function statsCalcul(plans, avancement) {
       'meilleur gain<br>par contrat', null);
 }
 
+// Pas d'histogramme ici : celui des entrees achetees repetait les "x/10" des
+// vignettes. Ce que la page ne montrait nulle part d'un coup d'oeil, c'est
+// QUAND revenir -- le verrou de 7 jours fixe le jour ou chaque contrat complet
+// devient executable, et ces dates etaient eparpillees dans les vignettes.
+function calendrier(l) {
+  const debut = new Date();
+  debut.setHours(0, 0, 0, 0);
+  const jour = 24 * 3600 * 1000;
+  const jours = Array.from({length: 8}, () => []);
+  l.filter(c => colonneDe(c) === 'verrou' && c.craftable_at).forEach(c => {
+    const i = Math.floor((c.craftable_at * 1000 - debut.getTime()) / jour);
+    jours[Math.min(7, Math.max(0, i))].push(c);
+  });
+  const total = jours.reduce((n, j) => n + j.length, 0);
+  const cases = jours.map((j, i) => {
+    const d = new Date(debut.getTime() + i * jour);
+    const nom = i === 0 ? 'auj.'
+      : d.toLocaleDateString('fr-FR', {weekday: 'short'});
+    return `<div class="jour${i === 0 ? ' auj' : ''}">
+      <div class="jour-nom">${nom}</div><div class="jour-num">${d.getDate()}</div>
+      ${j.map(c => `<span class="deblo" data-ouvrir="${c.id}"
+        title="${nomCourt(c.collection)} : exécutable le ${dt(c.craftable_at)}"
+        >${nomCourt(c.collection)}</span>`).join('')}</div>`;
+  }).join('');
+  return `<div><div class="titre">Exécutables dans les 7 prochains jours</div>
+    <div class="calendrier">${cases}</div>
+    ${total ? '' : '<div class="vide" style="margin-top:8px">aucun contrat en '
+      + 'attente de son verrou</div>'}</div>`;
+}
+
 function statsContrats(l) {
   const actifs = l.filter(c => colonneDe(c) !== 'fini');
-  const barres = actifs.slice(0, 10).map(c => ({
-    valeur: c.purchased / 10,
-    plein: c.purchased >= 10,
-    lab: nomCourt(c.collection).slice(0, 4),
-    titre: nomCourt(c.collection) + ' : ' + c.purchased + '/10 achetés',
-  }));
-  const achetes = actifs.reduce((n, c) => n + c.purchased, 0);
-  const part = actifs.length ? achetes / (actifs.length * 10) : 0;
   const depense = actifs.reduce((s, c) => s + c.spent, 0);
   const prevu = actifs.reduce((s, c) => s + c.planned_cost, 0);
+  const gain = actifs.reduce((s, c) => s + (c.planned_profit || 0), 0);
   const prets = actifs.filter(c => c.craftable).length;
-  return graphe('Entrées achetées par contrat', barres) +
-    cadran(part, Math.round(part * 100) + '%', 'des entrées achetées') +
+  return calendrier(l) +
     chiffre(prets, 'exécutables<br>maintenant', '#contrats') +
+    chiffre((gain >= 0 ? '+' : '') + gain.toFixed(2),
+      'gain prévu des<br>contrats en cours', null) +
     chiffre(depense.toFixed(2), 'dépensés sur ' + prevu.toFixed(2) +
       '<br>prévus', null);
 }

@@ -144,6 +144,14 @@ const __cas = [
   ['bandeau des contrats', () => statsContrats([__contrat,
      { ...__contrat, status: 'realise' }])],
   ['bandeau des contrats, vide', () => statsContrats([])],
+  // Un contrat en verrou place dans le calendrier, et un autre dont la date
+  // est deja passee sans que le journal l'ait vu : ramene sur aujourd'hui.
+  ['calendrier des deblocages',
+   () => statsContrats([
+     { ...__contrat, purchased: 10, complete: true,
+       craftable_at: Date.now() / 1000 + 3 * 86400 },
+     { ...__contrat, id: 'c2', purchased: 10, complete: true,
+       craftable_at: Date.now() / 1000 - 3600 }])],
   ['bouton de retour a la liste', () => boutonRetour()],
   ['contrat a acheter', () => carteContrat(__contrat)],
   ['contrat executable',
